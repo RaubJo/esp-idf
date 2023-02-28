@@ -2,11 +2,11 @@
 #include "esp_system.h"
 #include "esp_task_wdt.h"
 #include "esp_attr.h"
+#include "esp_sleep.h"
 #include "soc/rtc.h"
 #include "hal/wdt_hal.h"
-#include "esp_sleep.h"
 #if CONFIG_IDF_TARGET_ARCH_RISCV
-#include "riscv/riscv_interrupts.h"
+#include "riscv/rv_utils.h"
 #endif
 
 #define RTC_BSS_ATTR __attribute__((section(".rtc.bss")))
@@ -21,11 +21,11 @@
 #define INT_WDT_PANIC       "Interrupt wdt timeout on CPU0"
 #define INT_WDT             "TG1WDT_SYS_RESET"
 #define RTC_WDT             "RTCWDT_RTC_RESET"
-#ifdef CONFIG_ESP32_REV_MIN_3
+#if CONFIG_ESP32_REV_MIN_FULL >= 300
 #define BROWNOUT            "RTCWDT_BROWN_OUT_RESET"
 #else
 #define BROWNOUT            "SW_CPU_RESET"
-#endif // CONFIG_ESP32_REV_MIN_3
+#endif // CONFIG_ESP32_REV_MIN_FULL >= 300
 #define STORE_ERROR         "StoreProhibited"
 
 #elif CONFIG_IDF_TARGET_ESP32S2 || CONFIG_IDF_TARGET_ESP32S3
@@ -38,7 +38,7 @@
 #define BROWNOUT            "BROWN_OUT_RST"
 #define STORE_ERROR         "StoreProhibited"
 
-#elif CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32H2 || CONFIG_IDF_TARGET_ESP32C2
+#elif CONFIG_IDF_TARGET_ESP32C3 || CONFIG_IDF_TARGET_ESP32H4 || CONFIG_IDF_TARGET_ESP32C2
 #define DEEPSLEEP           "DSLEEP"
 #define LOAD_STORE_ERROR    "Store access fault"
 #define RESET               "RTC_SW_CPU_RST"
@@ -46,6 +46,16 @@
 #define INT_WDT             "TG1WDT_SYS_RST"
 #define RTC_WDT             "RTCWDT_RTC_RST"
 #define BROWNOUT            "BROWNOUT_RST"
+#define STORE_ERROR         LOAD_STORE_ERROR
+
+#elif CONFIG_IDF_TARGET_ESP32C6
+#define DEEPSLEEP           "DSLEEP"
+#define LOAD_STORE_ERROR    "Store access fault"
+#define RESET               "SW_CPU"
+#define INT_WDT_PANIC       "Interrupt wdt timeout on CPU0"
+#define INT_WDT             "TG1_WDT_HPSYS"
+#define RTC_WDT             "LP_WDT_SYS"
+#define BROWNOUT            "LP_BOD_SYS"
 #define STORE_ERROR         LOAD_STORE_ERROR
 
 #endif // CONFIG_IDF_TARGET_ESP32
@@ -60,7 +70,7 @@ TEST_CASE("reset reason ESP_RST_POWERON", "[reset][ignore]")
 }
 
 
-#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
+#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2, ESP32H2)
 //IDF-5059
 static __NOINIT_ATTR uint32_t s_noinit_val;
 static RTC_NOINIT_ATTR uint32_t s_rtc_noinit_val;
@@ -86,7 +96,8 @@ static void setup_values(void)
     s_rtc_force_slow_val = CHECK_VALUE;
 }
 
-#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32S3)
+#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32S3, ESP32C6)
+// TODO IDF-5349, enable test when deep sleep is brought up
 static void do_deep_sleep(void)
 {
     setup_values();
@@ -199,7 +210,7 @@ static void do_int_wdt_hw(void)
 {
     setup_values();
 #if CONFIG_IDF_TARGET_ARCH_RISCV
-    riscv_global_interrupts_disable();
+    rv_utils_intr_global_disable();
 #else
     XTOS_SET_INTLEVEL(XCHAL_NMILEVEL);
 #endif
@@ -222,6 +233,7 @@ TEST_CASE_MULTIPLE_STAGES("reset reason ESP_RST_INT_WDT after interrupt watchdog
         do_int_wdt_hw,
         check_reset_reason_int_wdt);
 
+#if CONFIG_ESP_TASK_WDT_EN
 static void do_task_wdt(void)
 {
     setup_values();
@@ -248,9 +260,10 @@ static void check_reset_reason_task_wdt(void)
 }
 
 TEST_CASE_MULTIPLE_STAGES("reset reason ESP_RST_TASK_WDT after task watchdog",
-        "[reset_reason][reset=abort,"RESET"]",
+        "[reset_reason][reset="RESET"]",
         do_task_wdt,
         check_reset_reason_task_wdt);
+#endif // CONFIG_ESP_TASK_WDT_EN
 
 static void do_rtc_wdt(void)
 {
@@ -303,7 +316,7 @@ TEST_CASE_MULTIPLE_STAGES("reset reason ESP_RST_BROWNOUT after brownout event",
         do_brownout,
         check_reset_reason_brownout);
 
-#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
+#endif //!TEMPORARY_DISABLED_FOR_TARGETS(...)
 
 
 #ifdef CONFIG_SPIRAM_ALLOW_STACK_EXTERNAL_MEMORY

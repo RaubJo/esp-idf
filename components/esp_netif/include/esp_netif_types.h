@@ -33,6 +33,8 @@ extern "C" {
 #define ESP_ERR_ESP_NETIF_DNS_NOT_CONFIGURED    ESP_ERR_ESP_NETIF_BASE + 0x0A
 #define ESP_ERR_ESP_NETIF_MLD6_FAILED           ESP_ERR_ESP_NETIF_BASE + 0x0B
 #define ESP_ERR_ESP_NETIF_IP6_ADDR_FAILED       ESP_ERR_ESP_NETIF_BASE + 0x0C
+#define ESP_ERR_ESP_NETIF_DHCPS_START_FAILED    ESP_ERR_ESP_NETIF_BASE + 0x0D
+
 
 /**
  * @brief Definition of ESP-NETIF bridge controll
@@ -124,7 +126,6 @@ typedef struct {
  *
  */
 typedef struct {
-    int if_index;                    /*!< Interface index for which the event is received (left for legacy compilation) */
     esp_netif_t *esp_netif;          /*!< Pointer to corresponding esp-netif object */
     esp_netif_ip_info_t ip_info;     /*!< IP address, netmask, gatway IP address */
     bool ip_changed;                 /*!< Whether the assigned IP has changed or not */
@@ -132,7 +133,6 @@ typedef struct {
 
 /** Event structure for IP_EVENT_GOT_IP6 event */
 typedef struct {
-    int if_index;                    /*!< Interface index for which the event is received (left for legacy compilation) */
     esp_netif_t *esp_netif;          /*!< Pointer to corresponding esp-netif object */
     esp_netif_ip6_info_t ip6_info;   /*!< IPv6 address of the interface */
     int ip_index;                    /*!< IPv6 address index */
@@ -159,8 +159,7 @@ typedef enum esp_netif_flags {
     ESP_NETIF_FLAG_GARP   = 1 << 3,
     ESP_NETIF_FLAG_EVENT_IP_MODIFIED = 1 << 4,
     ESP_NETIF_FLAG_IS_PPP = 1 << 5,
-    ESP_NETIF_FLAG_IS_SLIP = 1 << 6,
-    ESP_NETIF_FLAG_IS_BRIDGE = 1 << 7,
+    ESP_NETIF_FLAG_IS_BRIDGE = 1 << 6,
 } esp_netif_flags_t;
 
 typedef enum esp_netif_ip_event_type {
@@ -244,6 +243,14 @@ struct esp_netif_config {
     const esp_netif_driver_ifconfig_t *driver; /*!< driver config */
     const esp_netif_netstack_config_t *stack; /*!< stack config */
 };
+
+/**
+ * @brief DHCP client's addr info (pair of MAC and IP address)
+ */
+typedef struct {
+    uint8_t mac[6];         /**< Clients MAC address */
+    esp_ip4_addr_t ip;      /**< Clients IP address */
+} esp_netif_pair_mac_ip_t;
 
 /**
  * @brief  ESP-NETIF Receive function type

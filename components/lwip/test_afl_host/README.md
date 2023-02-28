@@ -1,3 +1,6 @@
+| Supported Targets | Linux |
+| ----------------- | ----- |
+
 ## Introduction
 This test uses [american fuzzy lop](http://lcamtuf.coredump.cx/afl/) to mangle real dns, dhcp client, dhcp server packets and look for exceptions caused by the parser.
 

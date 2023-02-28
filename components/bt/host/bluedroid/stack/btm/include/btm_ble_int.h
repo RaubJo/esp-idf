@@ -28,6 +28,8 @@
 
 #include "common/bt_target.h"
 #include "osi/fixed_queue.h"
+#include "osi/pkt_queue.h"
+#include "osi/thread.h"
 #include "stack/hcidefs.h"
 #include "stack/btm_ble_api.h"
 #include "btm_int.h"
@@ -144,8 +146,6 @@ typedef struct {
 #endif // #if (BLE_50_FEATURE_SUPPORT == TRUE)
 
 #define BTM_BLE_ISVALID_PARAM(x, min, max)  (((x) >= (min) && (x) <= (max)) || ((x) == BTM_BLE_CONN_PARAM_UNDEF))
-
-#define BTM_BLE_PRIVATE_ADDR_INT    900  /* 15 minutes minimum for random address refreshing */
 
 typedef struct {
     UINT16 discoverable_mode;
@@ -341,6 +341,9 @@ typedef struct {
     tBTM_CMPL_CB *p_scan_cmpl_cb;
     TIMER_LIST_ENT scan_timer_ent;
 
+    struct pkt_queue *adv_rpt_queue;
+    struct osi_event *adv_rpt_ready;
+
     /* background connection procedure cb value */
     tBTM_BLE_CONN_TYPE bg_conn_type;
     UINT32 scan_int;
@@ -384,6 +387,9 @@ extern "C" {
 void btm_ble_timeout(TIMER_LIST_ENT *p_tle);
 void btm_ble_process_adv_pkt (UINT8 *p);
 void btm_ble_process_adv_discard_evt(UINT8 *p);
+void btm_ble_process_direct_adv_pkt (UINT8 *p);
+bool btm_ble_adv_pkt_ready(void);
+bool btm_ble_adv_pkt_post(pkt_linked_item_t *pkt);
 void btm_ble_proc_scan_rsp_rpt (UINT8 *p);
 tBTM_STATUS btm_ble_read_remote_name(BD_ADDR remote_bda, tBTM_INQ_INFO *p_cur, tBTM_CMPL_CB *p_cb);
 BOOLEAN btm_ble_cancel_remote_name(BD_ADDR remote_bda);
@@ -411,6 +417,7 @@ tBTM_STATUS btm_ble_stop_adv(void);
 tBTM_STATUS btm_ble_start_scan(void);
 void btm_ble_create_ll_conn_complete (UINT8 status);
 void btm_ble_create_conn_cancel_complete (UINT8 *p);
+tBTM_STATUS btm_ble_set_random_addr(BD_ADDR random_bda);
 
 /* LE security function from btm_sec.c */
 #if SMP_INCLUDED == TRUE
@@ -488,6 +495,7 @@ BOOLEAN btm_ble_disable_resolving_list(UINT8 rl_mask, BOOLEAN to_resume);
 void btm_ble_enable_resolving_list_for_platform (UINT8 rl_mask);
 void btm_ble_resolving_list_init(UINT8 max_irk_list_sz);
 void btm_ble_resolving_list_cleanup(void);
+void btm_ble_add_default_entry_to_resolving_list(void);
 #endif
 
 void btm_ble_multi_adv_configure_rpa (tBTM_BLE_MULTI_ADV_INST *p_inst);

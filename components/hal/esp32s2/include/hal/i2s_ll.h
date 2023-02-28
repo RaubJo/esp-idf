@@ -28,8 +28,6 @@ extern "C" {
 // Get I2S hardware instance with giving i2s num
 #define I2S_LL_GET_HW(num)             (((num) == 0) ? (&I2S0) : NULL)
 
-#define I2S_LL_BASE_CLK                (2 * APB_CLK_FREQ)
-
 #define I2S_LL_BCK_MAX_PRESCALE  (64)
 
 #define I2S_LL_MCLK_DIVIDER_BIT_WIDTH  (6)
@@ -43,6 +41,9 @@ extern "C" {
 
 #define I2S_LL_TX_EVENT_MASK        I2S_LL_EVENT_TX_EOF
 #define I2S_LL_RX_EVENT_MASK        I2S_LL_EVENT_RX_EOF
+
+#define I2S_LL_PLL_F160M_CLK_FREQ   (160 * 1000000) // PLL_F160M_CLK: 160MHz
+#define I2S_LL_DEFAULT_PLL_CLK_FREQ     I2S_LL_PLL_F160M_CLK_FREQ    // The default PLL clock frequency while using I2S_CLK_SRC_DEFAULT
 
 /* I2S clock configuration structure */
 typedef struct {
@@ -280,7 +281,7 @@ static inline void i2s_ll_tx_set_bck_div_num(i2s_dev_t *hw, uint32_t val)
  * @note mclk on ESP32S2 is shared by both TX and RX channel
  *
  * @param hw Peripheral I2S hardware instance address.
- * @param sclk system clock, 0 means use apll
+ * @param sclk system clock
  * @param mclk module clock
  * @param mclk_div integer part of the division from sclk to mclk
  */
@@ -356,7 +357,7 @@ static inline void i2s_ll_rx_set_bck_div_num(i2s_dev_t *hw, uint32_t val)
  * @note mclk on ESP32S2 is shared by both TX and RX channel
  *
  * @param hw Peripheral I2S hardware instance address.
- * @param sclk system clock, 0 means use apll
+ * @param sclk system clock
  * @param mclk module clock
  * @param mclk_div integer part of the division from sclk to mclk
  */
@@ -439,6 +440,7 @@ static inline volatile void *i2s_ll_get_intr_status_reg(i2s_dev_t *hw)
  * @return
  *        - module interrupt status
  */
+__attribute__((always_inline))
 static inline uint32_t i2s_ll_get_intr_status(i2s_dev_t *hw)
 {
     return hw->int_st.val;
@@ -458,6 +460,7 @@ static inline volatile void *i2s_ll_get_interrupt_status_reg(i2s_dev_t *hw)
  * @param hw Peripheral I2S hardware instance address.
  * @param clr_mask Interrupt mask to be cleared.
  */
+__attribute__((always_inline))
 static inline void i2s_ll_clear_intr_status(i2s_dev_t *hw, uint32_t clr_mask)
 {
     hw->int_clr.val = clr_mask;
@@ -640,6 +643,7 @@ static inline void i2s_ll_rx_stop_link(i2s_dev_t *hw)
  * @param hw Peripheral I2S hardware instance address.
  * @param eof_addr Pointer to accept out eof des address
  */
+__attribute__((always_inline))
 static inline void i2s_ll_tx_get_eof_des_addr(i2s_dev_t *hw, uint32_t *eof_addr)
 {
     *eof_addr = hw->out_eof_des_addr;
@@ -651,6 +655,7 @@ static inline void i2s_ll_tx_get_eof_des_addr(i2s_dev_t *hw, uint32_t *eof_addr)
  * @param hw Peripheral I2S hardware instance address.
  * @param eof_addr Pointer to accept in eof des address
  */
+__attribute__((always_inline))
 static inline void i2s_ll_rx_get_eof_des_addr(i2s_dev_t *hw, uint32_t *eof_addr)
 {
     *eof_addr = hw->in_eof_des_addr;
@@ -705,22 +710,22 @@ static inline void i2s_ll_enable_dma(i2s_dev_t *hw, bool ena)
 }
 
 /**
- * @brief Set I2S TX to philip standard
+ * @brief Set I2S TX to philips standard
  *
  * @param hw Peripheral I2S hardware instance address.
  */
-static inline void i2s_ll_tx_set_format_philip(i2s_dev_t *hw)
+static inline void i2s_ll_tx_set_format_philips(i2s_dev_t *hw)
 {
     hw->conf.tx_short_sync = 0;
     hw->conf.tx_msb_shift = 1;
 }
 
 /**
- * @brief Set I2S RX to philip standard
+ * @brief Set I2S RX to philips standard
  *
  * @param hw Peripheral I2S hardware instance address.
  */
-static inline void i2s_ll_rx_set_format_philip(i2s_dev_t *hw)
+static inline void i2s_ll_rx_set_format_philips(i2s_dev_t *hw)
 {
     hw->conf.rx_short_sync = 0;
     hw->conf.rx_msb_shift = 1;
@@ -841,22 +846,40 @@ static inline void i2s_ll_rx_enable_msb_shift(i2s_dev_t *hw, bool msb_shift_enab
  *
  * @param hw Peripheral I2S hardware instance address.
  * @param slot_mask select slot to send data
+ * @param is_mono is mono mode
  */
-static inline void i2s_ll_tx_select_slot(i2s_dev_t *hw, i2s_std_slot_mask_t slot_mask, bool is_msb_right)
+static inline void i2s_ll_tx_select_std_slot(i2s_dev_t *hw, i2s_std_slot_mask_t slot_mask, bool is_mono)
 {
-    switch (slot_mask)
-    {
-    case I2S_STD_SLOT_ONLY_RIGHT:
-        hw->conf_chan.tx_chan_mod = is_msb_right ? 1 : 2;
-        break;
-    case I2S_STD_SLOT_ONLY_LEFT:
-        hw->conf_chan.tx_chan_mod = is_msb_right ? 2 : 1;
-        break;
-    case I2S_STD_SLOT_LEFT_RIGHT:
-        hw->conf_chan.tx_chan_mod = 0;
-        break;
-    default:
-        break;
+    if (is_mono) {
+        switch (slot_mask)
+        {
+        case I2S_STD_SLOT_RIGHT:
+            hw->conf_chan.tx_chan_mod = 3;
+            break;
+        case I2S_STD_SLOT_LEFT:
+            hw->conf_chan.tx_chan_mod = 4;
+            break;
+        case I2S_STD_SLOT_BOTH:
+            hw->conf_chan.tx_chan_mod = 1; // 1 & 2 has same effect
+            break;
+        default:
+            break;
+        }
+    } else {
+        switch (slot_mask)
+        {
+        case I2S_STD_SLOT_RIGHT:
+            hw->conf_chan.tx_chan_mod = 1;
+            break;
+        case I2S_STD_SLOT_LEFT:
+            hw->conf_chan.tx_chan_mod = 2;
+            break;
+        case I2S_STD_SLOT_BOTH:
+            hw->conf_chan.tx_chan_mod = 0;
+            break;
+        default:
+            break;
+        }
     }
 }
 
@@ -866,17 +889,17 @@ static inline void i2s_ll_tx_select_slot(i2s_dev_t *hw, i2s_std_slot_mask_t slot
  * @param hw Peripheral I2S hardware instance address.
  * @param slot_mask select slot to receive data
  */
-static inline void i2s_ll_rx_select_slot(i2s_dev_t *hw, i2s_std_slot_mask_t slot_mask, bool is_msb_right)
+static inline void i2s_ll_rx_select_std_slot(i2s_dev_t *hw, i2s_std_slot_mask_t slot_mask, bool is_msb_right)
 {
     switch (slot_mask)
     {
-    case I2S_STD_SLOT_ONLY_RIGHT:
+    case I2S_STD_SLOT_RIGHT:
         hw->conf_chan.rx_chan_mod = is_msb_right ? 1 : 2;
         break;
-    case I2S_STD_SLOT_ONLY_LEFT:
+    case I2S_STD_SLOT_LEFT:
         hw->conf_chan.rx_chan_mod = is_msb_right ? 2 : 1;
         break;
-    case I2S_STD_SLOT_LEFT_RIGHT:
+    case I2S_STD_SLOT_BOTH:
         hw->conf_chan.rx_chan_mod = 0;
         break;
     default:

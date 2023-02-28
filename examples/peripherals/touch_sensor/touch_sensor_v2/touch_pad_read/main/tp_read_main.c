@@ -5,6 +5,7 @@
  */
 
 #include <stdio.h>
+#include <inttypes.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/touch_pad.h"
@@ -46,7 +47,7 @@ static void tp_example_read_task(void *pvParameter)
     while (1) {
         for (int i = 0; i < TOUCH_BUTTON_NUM; i++) {
             touch_pad_read_raw_data(button[i], &touch_value);    // read raw data.
-            printf("T%d: [%4d] ", button[i], touch_value);
+            printf("T%d: [%4"PRIu32"] ", button[i], touch_value);
         }
         printf("\n");
         vTaskDelay(200 / portTICK_PERIOD_MS);
@@ -85,5 +86,5 @@ void app_main(void)
     touch_pad_fsm_start();
 
     /* Start task to read values by pads. */
-    xTaskCreate(&tp_example_read_task, "touch_pad_read_task", 2048, NULL, 5, NULL);
+    xTaskCreate(&tp_example_read_task, "touch_pad_read_task", 4096, NULL, 5, NULL);
 }

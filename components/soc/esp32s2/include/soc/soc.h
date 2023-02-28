@@ -142,7 +142,7 @@
 //Periheral Clock {{
 #define  APB_CLK_FREQ_ROM                            ( 40*1000000 )
 #define  CPU_CLK_FREQ_ROM                            APB_CLK_FREQ_ROM
-#define  UART_CLK_FREQ_ROM                           APB_CLK_FREQ_ROM
+#define  CPU_CLK_FREQ_MHZ_BTLD                       (80)                 // The cpu clock frequency (in MHz) to set at 2nd stage bootloader system clock configuration
 #define  CPU_CLK_FREQ                                APB_CLK_FREQ
 #define  APB_CLK_FREQ                                ( 80*1000000 )       //unit: Hz
 #define  REF_CLK_FREQ                                ( 1000000 )
@@ -181,6 +181,10 @@
 #define SOC_DIRAM_IRAM_HIGH   0x40070000
 #define SOC_DIRAM_DRAM_LOW    0x3FFB0000
 #define SOC_DIRAM_DRAM_HIGH   0x40000000
+
+#define SOC_I_D_OFFSET (SOC_DIRAM_IRAM_LOW - SOC_DIRAM_DRAM_LOW)
+#define MAP_DRAM_TO_IRAM(addr) (addr + SOC_I_D_OFFSET)
+#define MAP_IRAM_TO_DRAM(addr) (addr - SOC_I_D_OFFSET)
 
 // Region of memory accessible via DMA in internal memory. See esp_ptr_dma_capable().
 #define SOC_DMA_LOW  0x3FFB0000
@@ -262,3 +266,6 @@
 
 //Invalid interrupt for number interrupt matrix
 #define ETS_INVALID_INUM                        6
+
+// Interrupt number for the Interrupt watchdog
+#define ETS_INT_WDT_INUM                         (ETS_T1_WDT_INUM)

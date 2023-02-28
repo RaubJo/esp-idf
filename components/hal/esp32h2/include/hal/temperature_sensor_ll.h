@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2020-2022 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -21,8 +21,10 @@
 #include "soc/apb_saradc_struct.h"
 #include "soc/soc.h"
 #include "soc/soc_caps.h"
+#include "soc/pcr_struct.h"
 #include "hal/temperature_sensor_types.h"
 #include "hal/assert.h"
+#include "hal/misc.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -39,7 +41,7 @@ extern "C" {
  */
 static inline void temperature_sensor_ll_enable(bool enable)
 {
-    APB_SARADC.apb_tsens_ctrl.tsens_pu = enable;
+    APB_SARADC.saradc_apb_tsens_ctrl.saradc_tsens_pu = enable;
 }
 
 /**
@@ -47,11 +49,11 @@ static inline void temperature_sensor_ll_enable(bool enable)
  */
 static inline void temperature_sensor_ll_clk_enable(bool enable)
 {
-    // No need to enable the temperature clock on esp32h2
+    // clock enable duplicated with periph enable, no need to enable it again.
 }
 
 /**
- * @brief Select the clock source for temperature sensor. On ESP32-H2, temperature sensor
+ * @brief Select the clock source for temperature sensor. On ESP32-C6, temperautre sensor
  *        can use XTAL or FOSC. To make it convenience, suggest using XTAL all the time.
  *
  * @param clk_src refer to ``temperature_sensor_clk_src_t``
@@ -70,7 +72,7 @@ static inline void temperature_sensor_ll_clk_sel(temperature_sensor_clk_src_t cl
             HAL_ASSERT(false);
             break;
     }
-    APB_SARADC.apb_tsens_ctrl2.tsens_clk_sel = clk_sel;
+    PCR.tsens_clk_conf.tsens_clk_sel = clk_sel;
 }
 
 /**
@@ -90,7 +92,7 @@ static inline void temperature_sensor_ll_set_range(uint32_t range)
  */
 static inline uint32_t temperature_sensor_ll_get_raw_value(void)
 {
-    return APB_SARADC.apb_tsens_ctrl.tsens_out;
+    return APB_SARADC.saradc_apb_tsens_ctrl.saradc_tsens_out;
 }
 
 /**
@@ -114,7 +116,7 @@ static inline uint32_t temperature_sensor_ll_get_offset(void)
  */
 static inline uint32_t temperature_sensor_ll_get_clk_div(void)
 {
-    return APB_SARADC.apb_tsens_ctrl.tsens_clk_div;
+    return APB_SARADC.saradc_apb_tsens_ctrl.saradc_tsens_clk_div;
 }
 
 /**
@@ -127,7 +129,97 @@ static inline uint32_t temperature_sensor_ll_get_clk_div(void)
  */
 static inline void temperature_sensor_ll_set_clk_div(uint8_t clk_div)
 {
-    APB_SARADC.apb_tsens_ctrl.tsens_clk_div = clk_div;
+    APB_SARADC.saradc_apb_tsens_ctrl.saradc_tsens_clk_div = clk_div;
+}
+
+/**
+ * @brief Choose the wake-up mode for temperature sensor
+ *
+ * @note ESP32-C6 does not support difference mode.
+ *
+ * @param mode 0: Absolute value mode. 1: Difference mode.
+ */
+static inline void temperature_sensor_ll_wakeup_mode(uint8_t mode)
+{
+    APB_SARADC.tsens_wake.saradc_wakeup_mode = mode;
+}
+
+/**
+ * @brief Configure whether to enable temperature sensor wake up
+ *
+ * @param en true: enable, false: disable.
+ */
+static inline void temperature_sensor_ll_wakeup_enable(bool en)
+{
+    APB_SARADC.tsens_wake.saradc_wakeup_en = en;
+}
+
+/**
+ * @brief Configures the low threshold for temperature sensor to wakeup
+ *
+ * @param th_low low threshold value.
+ */
+static inline void temperature_sensor_ll_set_th_low_val(uint8_t th_low)
+{
+    APB_SARADC.tsens_wake.saradc_wakeup_th_low = th_low;
+}
+
+/**
+ * @brief Configures the high threshold for temperature sensor to wakeup
+ *
+ * @param th_high high threshold value.
+ */
+static inline void temperature_sensor_ll_set_th_high_val(uint8_t th_high)
+{
+    APB_SARADC.tsens_wake.saradc_wakeup_th_high = th_high;
+}
+
+/**
+ * @brief Enable temperature sensor interrupt
+ *
+ * @param enable true: enable. false: disable
+ */
+static inline void temperature_sensor_ll_enable_intr(bool enable)
+{
+    APB_SARADC.saradc_int_ena.saradc_apb_saradc_tsens_int_ena = enable;
+}
+
+/**
+ * @brief Clear temperature sensor interrupt
+ */
+static inline void temperature_sensor_ll_clear_intr(void)
+{
+    APB_SARADC.saradc_int_clr.saradc_apb_saradc_tsens_int_clr = 1;
+}
+
+/**
+ * @brief Get temperature sensor interrupt status.
+ *
+ * @param[out] int_status interrupt status.
+ */
+static inline void temperature_sensor_ll_get_intr_status(uint8_t *int_status)
+{
+    *int_status = APB_SARADC.saradc_int_st.saradc_apb_saradc_tsens_int_st;
+}
+
+/**
+ * @brief Configure whether to enable hardware sampling
+ *
+ * @param en true: enable, false: disable
+ */
+static inline void temperature_sensor_ll_sample_enable(bool en)
+{
+    APB_SARADC.tsens_sample.saradc_tsens_sample_en = en;
+}
+
+/**
+ * @brief Configures the hardware sampling rate
+ *
+ * @param rate sampling rate
+ */
+static inline void temperature_sensor_ll_set_sample_rate(uint16_t rate)
+{
+    HAL_FORCE_MODIFY_U32_REG_FIELD(APB_SARADC.tsens_sample, saradc_tsens_sample_rate, rate);
 }
 
 #ifdef __cplusplus

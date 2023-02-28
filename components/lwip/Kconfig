@@ -19,12 +19,21 @@ menu "LWIP"
         bool "Enable tcpip core locking"
         default n
         help
-            If Enable tcpip　core locking,Creates a global mutex that is held
+            If Enable tcpip core locking,Creates a global mutex that is held
             during TCPIP thread operations.Can be locked by client code to perform
             lwIP operations without changing into TCPIP thread using callbacks.
             See LOCK_TCPIP_CORE() and UNLOCK_TCPIP_CORE().
 
-            If disable tcpip　core locking,TCP IP will perform tasks through context switching．
+            If disable tcpip core locking,TCP IP will perform tasks through context switching
+
+    config LWIP_CHECK_THREAD_SAFETY
+        bool "Checks that lwip API runs in expected context"
+        default n
+        help
+            Enable to check that the project does not violate lwip thread safety.
+            If enabled, all lwip functions that require thread awareness run an assertion
+            to verify that the TCP/IP core functionality is either locked or accessed
+            from the correct thread.
 
     config LWIP_DNS_SUPPORT_MDNS_QUERIES
         bool "Enable mDNS queries in resolving host name"
@@ -163,6 +172,13 @@ menu "LWIP"
         help
             Enabling this option allows reassemblying incoming fragmented IP6 packets.
 
+    config LWIP_IP_REASS_MAX_PBUFS
+        int "The maximum amount of pbufs waiting to be reassembled"
+        range 10 100
+        default 10
+        help
+            Set the maximum amount of pbufs waiting to be reassembled.
+
     config LWIP_IP_FORWARD
         bool "Enable IP forwarding"
         default n
@@ -172,7 +188,6 @@ menu "LWIP"
     config LWIP_IPV4_NAPT
         bool "Enable NAT (new/experimental)"
         depends on LWIP_IP_FORWARD
-        select LWIP_L2_TO_L3_COPY
         default n
         help
             Enabling this option allows Network Address and Port Translation.
@@ -256,6 +271,14 @@ menu "LWIP"
         range 0 256
         help
             Number of clients that may store data in client_data member array of struct netif.
+
+    config LWIP_DHCP_COARSE_TIMER_SECS
+        int "DHCP coarse timer interval(s)"
+        default 1
+        range 1 10
+        help
+            Set DHCP coarse interval in seconds.
+            A higher value will be less precise but cost less power consumption.
 
     menu "DHCP server"
 
@@ -481,7 +504,13 @@ menu "LWIP"
             int "Maximum segment lifetime (MSL)"
             default 60000
             help
-                Set maximum segment lifetime in in milliseconds.
+                Set maximum segment lifetime in milliseconds.
+
+        config LWIP_TCP_FIN_WAIT_TIMEOUT
+            int "Maximum FIN segment lifetime"
+            default 20000
+            help
+                Set maximum segment lifetime in milliseconds.
 
         config LWIP_TCP_SND_BUF_DEFAULT
             int "Default send buffer size"
@@ -691,12 +720,10 @@ menu "LWIP"
 
 
     menuconfig LWIP_PPP_SUPPORT
-        bool "Enable PPP support (new/experimental)"
+        bool "Enable PPP support"
         default n
         help
             Enable PPP stack. Now only PPP over serial is possible.
-
-            PPP over serial support is experimental and unsupported.
 
     config LWIP_PPP_ENABLE_IPV6
         bool "Enable IPV6 support for PPP connections (IPV6CP)"
@@ -965,7 +992,8 @@ menu "LWIP"
 
         choice LWIP_HOOK_NETCONN_EXTERNAL_RESOLVE
             prompt "Netconn external resolve Hook"
-            default LWIP_HOOK_NETCONN_EXT_RESOLVE_NONE
+            default LWIP_HOOK_NETCONN_EXT_RESOLVE_DEFAULT if OPENTHREAD_DNS64_CLIENT
+            default LWIP_HOOK_NETCONN_EXT_RESOLVE_NONE if !OPENTHREAD_DNS64_CLIENT
             help
                 Enables custom DNS resolve hook.
                 Setting this to "default" provides weak implementation
@@ -1079,6 +1107,11 @@ menu "LWIP"
         depends on LWIP_DEBUG
         default n
 
+    config LWIP_UDP_DEBUG
+        bool "Enable UDP debug messages"
+        depends on LWIP_DEBUG
+        default n
+
     config LWIP_SNTP_DEBUG
         bool "Enable SNTP debug messages"
         depends on LWIP_DEBUG
@@ -1087,6 +1120,11 @@ menu "LWIP"
     config LWIP_DNS_DEBUG
         bool "Enable DNS debug messages"
         depends on LWIP_DEBUG
+        default n
+
+    config LWIP_NAPT_DEBUG
+        bool "Enable NAPT debug messages"
+        depends on LWIP_DEBUG && LWIP_IPV4_NAPT
         default n
 
     config LWIP_BRIDGEIF_DEBUG

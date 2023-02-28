@@ -41,9 +41,6 @@ extern "C" {
 #define ADC_HAL_DMA_INTR_MASK                           BIT(9)
 #endif
 
-//For ADC module, each conversion contains 4 bytes
-#define ADC_HAL_DATA_LEN_PER_CONV 4
-
 /**
  * @brief Enum for DMA descriptor status
  */
@@ -82,25 +79,15 @@ typedef struct adc_hal_dma_ctx_t {
 } adc_hal_dma_ctx_t;
 
 typedef struct adc_hal_digi_ctrlr_cfg_t {
-    bool                        conv_limit_en;      //1: adc conversion will stop when `conv_limit_num` reaches. 0: won't stop. NOTE: esp32 should always be set to 1.
-    uint32_t                    conv_limit_num;     //see `conv_limit_en`
     uint32_t                    adc_pattern_len;    //total pattern item number, including ADC1 and ADC2
     adc_digi_pattern_config_t   *adc_pattern;       //pattern item
     uint32_t                    sample_freq_hz;     //ADC sample frequency
     adc_digi_convert_mode_t     conv_mode;          //controller work mode
     uint32_t                    bit_width;          //output data width
+    adc_continuous_clk_src_t    clk_src;            ///< Clock source
+    uint32_t                    clk_src_freq_hz;    ///< Clock source frequency in hz
 } adc_hal_digi_ctrlr_cfg_t;
 
-
-/*---------------------------------------------------------------
-                    Common setting
----------------------------------------------------------------*/
-/**
- * Set ADC module power management.
- *
- * @prarm manage Set ADC power status.
- */
-#define adc_hal_set_power_manage(manage) adc_ll_set_power_manage(manage)
 
 /*---------------------------------------------------------------
                     PWDET(Power detect) controller setting
@@ -120,20 +107,6 @@ typedef struct adc_hal_digi_ctrlr_cfg_t {
  * @return cct Range: 0 ~ 7.
  */
 #define adc_hal_pwdet_get_cct() adc_ll_pwdet_get_cct()
-
-/**
- *  Enable/disable the output of ADCn's internal reference voltage to one of ADC2's channels.
- *
- *  This function routes the internal reference voltage of ADCn to one of
- *  ADC2's channels. This reference voltage can then be manually measured
- *  for calibration purposes.
- *
- *  @note  ESP32 only supports output of ADC2's internal reference voltage.
- *  @param[in]  adc ADC unit select
- *  @param[in]  channel ADC2 channel number
- *  @param[in]  en Enable/disable the reference voltage output
- */
-#define adc_hal_vref_output(adc, channel, en) adc_ll_vref_output(adc, channel, en)
 
 /*---------------------------------------------------------------
                     Digital controller setting
@@ -230,25 +203,6 @@ void adc_hal_digi_dis_intr(adc_hal_dma_ctx_t *hal, uint32_t mask);
  * @param hal Context of the HAL
  */
 void adc_hal_digi_stop(adc_hal_dma_ctx_t *hal);
-
-
-/*---------------------------------------------------------------
-                    ADC Single Read
----------------------------------------------------------------*/
-/**
- * Start an ADC conversion and get the converted value.
- *
- * @note It may be block to wait conversion finish.
- *
- * @param      adc_n   ADC unit.
- * @param      channel ADC channel number.
- * @param[out] out_raw ADC converted result
- *
- * @return
- *      - ESP_OK:                The value is valid.
- *      - ESP_ERR_INVALID_STATE: The value is invalid.
- */
-esp_err_t adc_hal_convert(adc_unit_t adc_n, int channel, int *out_raw);
 
 #ifdef __cplusplus
 }

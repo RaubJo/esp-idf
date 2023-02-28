@@ -17,6 +17,7 @@
 #elif __riscv
 #include "riscv/rv_utils.h"
 #endif
+#include "esp_intr_alloc.h"
 #include "esp_err.h"
 
 #ifdef __cplusplus
@@ -34,7 +35,7 @@ typedef uint32_t esp_cpu_cycle_count_t;
  * @brief CPU interrupt type
  */
 typedef enum {
-    ESP_CPU_INTR_TYPE_LEVEL,
+    ESP_CPU_INTR_TYPE_LEVEL = 0,
     ESP_CPU_INTR_TYPE_EDGE,
     ESP_CPU_INTR_TYPE_NA,
 } esp_cpu_intr_type_t;
@@ -511,6 +512,29 @@ FORCE_INLINE_ATTR void esp_cpu_dbgr_break(void)
 #endif
 }
 
+// ---------------------- Instructions -------------------------
+
+/**
+ * @brief Given the return address, calculate the address of the preceding call instruction
+ * This is typically used to answer the question "where was the function called from?"
+ * @param return_address  The value of the return address register.
+ *                        Typically set to the value of __builtin_return_address(0).
+ * @return Address of the call instruction preceding the return address.
+ */
+FORCE_INLINE_ATTR intptr_t esp_cpu_get_call_addr(intptr_t return_address)
+{
+    /* Both Xtensa and RISC-V have 2-byte instructions, so to get this right we
+     * should decode the preceding instruction as if it is 2-byte, check if it is a call,
+     * else treat it as 3 or 4 byte one. However for the cases where this function is
+     * used, being off by one instruction is usually okay, so this is kept simple for now.
+     */
+#ifdef __XTENSA__
+    return return_address - 3;
+#else
+    return return_address - 4;
+#endif
+}
+
 /* ------------------------------------------------------ Misc ---------------------------------------------------------
  *
  * ------------------------------------------------------------------------------------------------------------------ */
@@ -524,33 +548,6 @@ FORCE_INLINE_ATTR void esp_cpu_dbgr_break(void)
  * @return Whether the atomic variable was set or not
  */
 bool esp_cpu_compare_and_set(volatile uint32_t *addr, uint32_t compare_value, uint32_t new_value);
-
-/* ---------------------------------------------------- Deprecate ------------------------------------------------------
- *
- * ------------------------------------------------------------------------------------------------------------------ */
-
-/*
-[refactor-todo] Make these deprecated inline
-*/
-typedef esp_cpu_cycle_count_t           esp_cpu_ccount_t;
-#define esp_cpu_get_ccount()            esp_cpu_get_cycle_count()
-#define esp_cpu_set_ccount(ccount)      esp_cpu_set_cycle_count(ccount)
-
-/**
- * @brief Returns true if a JTAG debugger is attached to CPU OCD (on chip debug) port.
- *
- * [refactor-todo]  See if this can be replaced with esp_cpu_dbgr_is_attached directly
- *
- * @note Always returns false if CONFIG_ESP_DEBUG_OCDAWARE is not enabled
- */
-FORCE_INLINE_ATTR bool esp_cpu_in_ocd_debug_mode(void)
-{
-#if CONFIG_ESP_DEBUG_OCDAWARE
-    return esp_cpu_dbgr_is_attached();
-#else  // CONFIG_ESP_DEBUG_OCDAWARE
-    return false; // Always return false if "OCD aware" is disabled
-#endif // CONFIG_ESP_DEBUG_OCDAWARE
-}
 
 #ifdef __cplusplus
 }

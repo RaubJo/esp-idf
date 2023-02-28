@@ -9,10 +9,11 @@
 #include "sdkconfig.h"
 #include <stdint.h>
 #include "spinlock.h"
-#include "soc/interrupt_core0_reg.h"
+#include "soc/interrupt_reg.h"
 #include "esp_macros.h"
-#include "hal/cpu_hal.h"
+#include "esp_cpu.h"
 #include "esp_private/crosscore_int.h"
+#include "esp_memory_utils.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -225,7 +226,7 @@ static inline void __attribute__((always_inline)) vPortYieldCore( BaseType_t xCo
 
 static inline BaseType_t __attribute__((always_inline)) xPortGetCoreID( void )
 {
-    return (BaseType_t) cpu_hal_get_core_id();
+    return (BaseType_t) esp_cpu_get_core_id();
 }
 
 /* ------------------------------------------------ IDF Compatibility --------------------------------------------------
@@ -241,42 +242,6 @@ static inline BaseType_t xPortInIsrContext(void)
 // Added for backward compatibility with IDF
 #define xPortInterruptedFromISRContext()    xPortInIsrContext()
 
-// ---------------------- Spinlocks ------------------------
-
-/**
- * @brief Wrapper for atomic compare-and-set instruction
- *
- * @note Isn't a real atomic CAS.
- * @note [refactor-todo] check if we still need this
- * @note [refactor-todo] Check if this function should be renamed (due to void return type)
- *
- * @param[inout] addr Pointer to target address
- * @param[in] compare Compare value
- * @param[inout] set Pointer to set value
- */
-static inline void __attribute__((always_inline)) uxPortCompareSet(volatile uint32_t *addr, uint32_t compare, uint32_t *set)
-{
-    compare_and_set_native(addr, compare, set);
-}
-
-/**
- * @brief Wrapper for atomic compare-and-set instruction in external RAM
- *
- * @note Isn't a real atomic CAS.
- * @note [refactor-todo] check if we still need this
- * @note [refactor-todo] Check if this function should be renamed (due to void return type)
- *
- * @param[inout] addr Pointer to target address
- * @param[in] compare Compare value
- * @param[inout] set Pointer to set value
- */
-static inline void uxPortCompareSetExtram(volatile uint32_t *addr, uint32_t compare, uint32_t *set)
-{
-#if defined(CONFIG_SPIRAM)
-    compare_and_set_extram(addr, compare, set);
-#endif
-}
-
 // ------------------ Critical Sections --------------------
 
 /*
@@ -291,11 +256,11 @@ void vPortEnterCritical(void);
 void vPortExitCritical(void);
 
 //IDF task critical sections
-#define portTRY_ENTER_CRITICAL(lock, timeout)       {((void) lock; (void) timeout; vPortEnterCritical(); pdPASS;)}
+#define portTRY_ENTER_CRITICAL(lock, timeout)       ({(void) lock; (void) timeout; vPortEnterCritical(); pdPASS;})
 #define portENTER_CRITICAL_IDF(lock)                ({(void) lock; vPortEnterCritical();})
 #define portEXIT_CRITICAL_IDF(lock)                 ({(void) lock; vPortExitCritical();})
 //IDF ISR critical sections
-#define portTRY_ENTER_CRITICAL_ISR(lock, timeout)   {((void) lock; (void) timeout; vPortEnterCritical(); pdPASS;)}
+#define portTRY_ENTER_CRITICAL_ISR(lock, timeout)   ({(void) lock; (void) timeout; vPortEnterCritical(); pdPASS;})
 #define portENTER_CRITICAL_ISR(lock)                ({(void) lock; vPortEnterCritical();})
 #define portEXIT_CRITICAL_ISR(lock)                 ({(void) lock; vPortExitCritical();})
 //IDF safe critical sections (they're the same)
@@ -343,14 +308,6 @@ extern volatile BaseType_t xPortSwitchFlag;
 #define os_task_switch_is_pended(_cpu_) (xPortSwitchFlag)
 #else
 #define os_task_switch_is_pended(_cpu_) (false)
-#endif
-
-// --------------------- Debugging -------------------------
-
-#if CONFIG_FREERTOS_ASSERT_ON_UNTESTED_FUNCTION
-#define UNTESTED_FUNCTION() do{ esp_rom_printf("Untested FreeRTOS function %s\r\n", __FUNCTION__); configASSERT(false); } while(0)
-#else
-#define UNTESTED_FUNCTION()
 #endif
 
 // --------------- Compatibility Includes ------------------

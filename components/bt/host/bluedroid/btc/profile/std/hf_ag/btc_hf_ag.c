@@ -38,6 +38,28 @@
 /************************************************************************************
 **  Constants & Macros
 ************************************************************************************/
+#ifndef BTC_HSAG_SERVICE_NAME
+#define BTC_HSAG_SERVICE_NAME ("Headset Gateway")
+#endif
+
+#ifndef BTC_HFAG_SERVICE_NAME
+#define BTC_HFAG_SERVICE_NAME ("Handsfree Gateway")
+#endif
+
+#ifndef BTC_HF_SERVICES
+#define BTC_HF_SERVICES    (BTA_HSP_SERVICE_MASK | BTA_HFP_SERVICE_MASK )
+#endif
+
+#ifndef BTC_HF_SERVICE_NAMES
+#define BTC_HF_SERVICE_NAMES {BTC_HSAG_SERVICE_NAME , BTC_HFAG_SERVICE_NAME}
+#endif
+
+#ifndef BTC_HF_SECURITY
+#define BTC_HF_SECURITY    (BTA_SEC_AUTHENTICATE | BTA_SEC_ENCRYPT)
+#endif
+
+#define BTC_HF_INVALID_IDX       -1
+
 /* Max HF Clients Supported From App */
 static UINT16 btc_max_hf_clients = 1;
 /* HF Param Definition */
@@ -114,8 +136,7 @@ BTIF_TRACE_EVENT("CHECK_HF_INIT: %s", __FUNCTION__);\
 static int btc_hf_idx_by_bdaddr(bt_bdaddr_t *bd_addr)
 {
     for (int i = 0; i < btc_max_hf_clients; ++i) {
-        if ((bdcmp(bd_addr->address, hf_local_param[i].btc_hf_cb.connected_bda.address) == 0)
-            || bd_addr->address) {
+        if (bdcmp(bd_addr->address, hf_local_param[i].btc_hf_cb.connected_bda.address) == 0) {
             return i;
         }
     }
@@ -227,7 +248,7 @@ static void bte_hf_evt(tBTA_AG_EVT event, tBTA_AG *param)
     msg.act = event;
 
     /* Switch to BTC context */
-    bt_status_t status = btc_transfer_context(&msg, param, param_len, NULL);
+    bt_status_t status = btc_transfer_context(&msg, param, param_len, NULL, NULL);
     /* catch any failed context transfers */
     BTC_ASSERTC(status == BT_STATUS_SUCCESS, "context transfer failed", status);
 }
@@ -288,16 +309,9 @@ bt_status_t btc_hf_execute_service(BOOLEAN b_enable)
 /************************************************************************************
 **  Initialization and Connection Handle
 ************************************************************************************/
-bt_status_t btc_hf_init(bt_bdaddr_t *bd_addr)
+bt_status_t btc_hf_init(void)
 {
     int idx = 0;
-    UNUSED(bd_addr);
-
-#if HFP_DYNAMIC_MEMORY == TRUE
-    if ((hf_local_param = (hf_local_param_t *)osi_malloc(sizeof(hf_local_param_t) * BTC_HF_NUM_CB)) == NULL) {
-        return BT_STATUS_FAIL;
-    }
-#endif
 
     BTC_TRACE_DEBUG("%s - max_hf_clients=%d", __func__, btc_max_hf_clients);
     /* Invoke the enable service API to the core to set the appropriate service_id
@@ -322,10 +336,8 @@ bt_status_t btc_hf_init(bt_bdaddr_t *bd_addr)
     return BT_STATUS_SUCCESS;
 }
 
-void btc_hf_deinit(bt_bdaddr_t *bd_addr)
+void btc_hf_deinit(void)
 {
-    UNUSED(bd_addr);
-
     BTC_TRACE_EVENT("%s", __FUNCTION__);
     btc_dm_disable_service(BTA_HFP_SERVICE_ID);
 #if HFP_DYNAMIC_MEMORY == TRUE
@@ -1064,13 +1076,13 @@ void btc_hf_call_handler(btc_msg_t *msg)
     switch (msg->act) {
         case BTC_HF_INIT_EVT:
         {
-            btc_hf_init(&arg->init);
+            btc_hf_init();
             break;
         }
 
         case BTC_HF_DEINIT_EVT:
         {
-            btc_hf_deinit(&arg->deinit);
+            btc_hf_deinit();
             break;
         }
 
@@ -1460,10 +1472,10 @@ void btc_hf_cb_handler(btc_msg_t *msg)
         case BTA_AG_AT_D_EVT:
         {
             do {
-                if (event == BTA_AG_AT_D_EVT && p_data->val.str) {           // dial_number_or_memory
+                if (event == BTA_AG_AT_D_EVT) {           // dial_number_or_memory
                     memset(&param, 0, sizeof(esp_hf_cb_param_t));
                     param.out_call.num_or_loc = osi_malloc((strlen(p_data->val.str) + 1) * sizeof(char));
-                    sprintf(param.out_call.num_or_loc, p_data->val.str);
+                    sprintf(param.out_call.num_or_loc, "%s", p_data->val.str);
                     btc_hf_cb_to_app(ESP_HF_DIAL_EVT, &param);
                     send_indicator_update(BTA_AG_IND_CALLSETUP,BTA_AG_CALLSETUP_OUTGOING);
                     osi_free(param.out_call.num_or_loc);

@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2022 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2022-2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -160,7 +160,7 @@ TEST_CASE("rmt_ping_pong_trans_with_dma", "[rmt]")
 #endif
 
 TEST_RMT_CALLBACK_ATTR
-static bool test_rmt_tx_done_cb_check_event_data(rmt_channel_handle_t channel, rmt_tx_done_event_data_t *edata, void *user_data)
+static bool test_rmt_tx_done_cb_check_event_data(rmt_channel_handle_t channel, const rmt_tx_done_event_data_t *edata, void *user_data)
 {
     uint32_t *p_expected_encoded_size = (uint32_t *)user_data;
     TEST_ASSERT_EQUAL(*p_expected_encoded_size, edata->num_symbols);
@@ -237,7 +237,7 @@ TEST_CASE("rmt_trans_done_event_callback_with_dma", "[rmt]")
 #if SOC_RMT_SUPPORT_TX_LOOP_COUNT
 
 TEST_RMT_CALLBACK_ATTR
-static bool test_rmt_loop_done_cb_check_event_data(rmt_channel_handle_t channel, rmt_tx_done_event_data_t *edata, void *user_data)
+static bool test_rmt_loop_done_cb_check_event_data(rmt_channel_handle_t channel, const rmt_tx_done_event_data_t *edata, void *user_data)
 {
     uint32_t *p_expected_encoded_size = (uint32_t *)user_data;
     TEST_ASSERT_EQUAL(*p_expected_encoded_size, edata->num_symbols);
@@ -454,7 +454,7 @@ TEST_CASE("rmt_tx_nec_carrier_with_dma", "[rmt]")
 #endif
 
 TEST_RMT_CALLBACK_ATTR
-static bool test_rmt_tx_done_cb_record_time(rmt_channel_handle_t channel, rmt_tx_done_event_data_t *edata, void *user_data)
+static bool test_rmt_tx_done_cb_record_time(rmt_channel_handle_t channel, const rmt_tx_done_event_data_t *edata, void *user_data)
 {
     int64_t *record_time = (int64_t *)user_data;
     *record_time = esp_timer_get_time();
@@ -464,7 +464,9 @@ static bool test_rmt_tx_done_cb_record_time(rmt_channel_handle_t channel, rmt_tx
 static void test_rmt_multi_channels_trans(size_t channel0_mem_block_symbols, size_t channel1_mem_block_symbols, bool channel0_with_dma, bool channel1_with_dma)
 {
 #define TEST_RMT_CHANS 2
-#define TEST_LED_NUM   24
+#define TEST_LED_NUM   1
+#define TEST_STOP_TIME_NO_SYNCHRO_DELTA     300
+#define TEST_STOP_TIME_SYNCHRO_DELTA        60
     rmt_tx_channel_config_t tx_channel_cfg = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = 10000000, // 10MHz, 1 tick = 0.1us (led strip needs a high resolution)
@@ -526,7 +528,7 @@ static void test_rmt_multi_channels_trans(size_t channel0_mem_block_symbols, siz
         printf("\t%lld\r\n", record_stop_time[i]);
     }
     // without synchronization, there will be obvious time shift
-    TEST_ASSERT((record_stop_time[1] - record_stop_time[0]) < 100);
+    TEST_ASSERT_INT64_WITHIN(TEST_STOP_TIME_NO_SYNCHRO_DELTA, record_stop_time[0], record_stop_time[1]);
 
     printf("install sync manager\r\n");
     rmt_sync_manager_handle_t synchro = NULL;
@@ -556,7 +558,7 @@ static void test_rmt_multi_channels_trans(size_t channel0_mem_block_symbols, siz
     }
     // because of synchronization, the managed channels will stop at the same time
     // but call of `esp_timer_get_time` won't happen at the same time, so there still be time drift, very small
-    TEST_ASSERT((record_stop_time[1] - record_stop_time[0]) < 10);
+    TEST_ASSERT_INT64_WITHIN(TEST_STOP_TIME_SYNCHRO_DELTA, record_stop_time[0], record_stop_time[1]);
 
     printf("reset sync manager\r\n");
     TEST_ESP_OK(rmt_sync_reset(synchro));
@@ -573,7 +575,7 @@ static void test_rmt_multi_channels_trans(size_t channel0_mem_block_symbols, siz
     for (int i = 0; i < TEST_RMT_CHANS; i++) {
         printf("\t%lld\r\n", record_stop_time[i]);
     }
-    TEST_ASSERT((record_stop_time[1] - record_stop_time[0]) < 10);
+    TEST_ASSERT_INT64_WITHIN(TEST_STOP_TIME_SYNCHRO_DELTA, record_stop_time[0], record_stop_time[1]);
 
     printf("delete sync manager\r\n");
     TEST_ESP_OK(rmt_del_sync_manager(synchro));

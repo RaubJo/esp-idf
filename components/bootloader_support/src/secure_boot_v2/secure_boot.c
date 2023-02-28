@@ -15,6 +15,22 @@
 #include "esp_efuse.h"
 #include "esp_efuse_table.h"
 
+#if CONFIG_IDF_TARGET_ESP32
+#include "esp32/rom/secure_boot.h"
+#elif CONFIG_IDF_TARGET_ESP32S2
+#include "esp32s2/rom/secure_boot.h"
+#elif CONFIG_IDF_TARGET_ESP32C3
+#include "esp32c3/rom/secure_boot.h"
+#elif CONFIG_IDF_TARGET_ESP32S3
+#include "esp32s3/rom/secure_boot.h"
+#elif CONFIG_IDF_TARGET_ESP32H4
+#include "esp32h4/rom/secure_boot.h"
+#elif CONFIG_IDF_TARGET_ESP32C2
+#include "esp32c2/rom/secure_boot.h"
+#elif CONFIG_IDF_TARGET_ESP32C6
+#include "esp32c6/rom/secure_boot.h"
+#endif
+
 /* The following API implementations are used only when called
  * from the bootloader code.
  */
@@ -263,7 +279,7 @@ static esp_err_t check_and_generate_secure_boot_keys(const esp_image_metadata_t 
 
     ESP_LOGI(TAG, "%d signature block(s) found appended to the app.", app_key_digests.num_digests);
     if (app_key_digests.num_digests > boot_key_digests.num_digests) {
-        ESP_LOGW(TAG, "App has %d signature blocks but bootloader only has %d. Some keys missing from bootloader?");
+        ESP_LOGW(TAG, "App has %d signature blocks but bootloader only has %d. Some keys missing from bootloader?", app_key_digests.num_digests, boot_key_digests.num_digests);
     }
 
     /* Confirm if at least one public key from the application matches a public key in the bootloader

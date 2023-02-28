@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2015-2021 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2015-2022 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -126,7 +126,7 @@ void esp_wifi_internal_free_rx_buffer(void* buffer);
   * copy to WiFi driver.
   *
   * @param  wifi_interface_t wifi_if : wifi interface id
-  * @param  void *buffer : the buffer to be tansmit
+  * @param  void *buffer : the buffer to be transmit
   * @param  uint16_t len : the length of buffer
   *
   * @return
@@ -329,6 +329,17 @@ esp_err_t esp_wifi_internal_crypto_funcs_md5_check(const char *md5);
 esp_err_t esp_wifi_internal_wifi_type_md5_check(const char *md5);
 
 /**
+  * @brief     Check the MD5 values of the esp_wifi_he_types.h in IDF and WiFi library
+  *
+  * @attention 1. It is used for internal CI version check
+  *
+  * @return
+  *     - ESP_OK : succeed
+  *     - ESP_WIFI_INVALID_ARG : MD5 check fail
+  */
+esp_err_t esp_wifi_internal_wifi_he_type_md5_check(const char *md5);
+
+/**
   * @brief     Check the MD5 values of the esp_wifi.h in IDF and WiFi library
   *
   * @attention 1. It is used for internal CI version check
@@ -338,6 +349,17 @@ esp_err_t esp_wifi_internal_wifi_type_md5_check(const char *md5);
   *     - ESP_WIFI_INVALID_ARG : MD5 check fail
   */
 esp_err_t esp_wifi_internal_esp_wifi_md5_check(const char *md5);
+
+/**
+  * @brief     Check the MD5 values of the esp_wifi_he.h in IDF and WiFi library
+  *
+  * @attention 1. It is used for internal CI version check
+  *
+  * @return
+  *     - ESP_OK : succeed
+  *     - ESP_WIFI_INVALID_ARG : MD5 check fail
+  */
+esp_err_t esp_wifi_internal_esp_wifi_he_md5_check(const char *md5);
 
 /**
   * @brief     Allocate a chunk of memory for WiFi driver
@@ -463,7 +485,7 @@ esp_err_t esp_wifi_internal_get_config_channel(wifi_interface_t ifx, uint8_t *pr
   * @param     aid : the connection number when a STA connects to the softAP
   * @param     primary : store the negotiated primary channel
   * @param     second : store the negotiated second channel
-  * @attention the aid param is only works when the ESP32 in softAP/softAP+STA mode
+  * @attention the aid param is only works when the device in softAP/softAP+STA mode
   *
   * @return
   *    - ESP_OK: succeed
@@ -496,6 +518,15 @@ bool esp_wifi_internal_is_tsf_active(void);
   *
   */
 void esp_wifi_internal_update_light_sleep_wake_ahead_time(uint32_t);
+
+/**
+  * @brief     Update WiFi TSF tick interval
+  *
+  * @return
+  *    - true: Active
+  *    - false: Not active
+  */
+esp_err_t esp_wifi_update_tsf_tick_interval(void);
 #endif
 
 /**

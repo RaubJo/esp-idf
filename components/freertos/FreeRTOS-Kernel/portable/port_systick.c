@@ -11,10 +11,11 @@
 #include "esp_intr_alloc.h"
 #include "esp_err.h"
 #include "esp_log.h"
+#include "esp_private/systimer.h"
+#include "esp_private/periph_ctrl.h"
 #include "sdkconfig.h"
 #ifdef CONFIG_FREERTOS_SYSTICK_USES_SYSTIMER
 #include "soc/periph_defs.h"
-#include "soc/system_reg.h"
 #include "hal/systimer_hal.h"
 #include "hal/systimer_ll.h"
 #endif
@@ -80,33 +81,39 @@ void vPortSetupTimer(void)
     ESP_ERROR_CHECK(esp_intr_alloc(ETS_SYSTIMER_TARGET0_EDGE_INTR_SOURCE + cpuid, ESP_INTR_FLAG_IRAM | level, SysTickIsrHandler, &systimer_hal, NULL));
 
     if (cpuid == 0) {
+        periph_module_enable(PERIPH_SYSTIMER_MODULE);
         systimer_hal_init(&systimer_hal);
-        systimer_ll_set_counter_value(systimer_hal.dev, SYSTIMER_LL_COUNTER_OS_TICK, 0);
-        systimer_ll_apply_counter_value(systimer_hal.dev, SYSTIMER_LL_COUNTER_OS_TICK);
+        systimer_hal_tick_rate_ops_t ops = {
+            .ticks_to_us = systimer_ticks_to_us,
+            .us_to_ticks = systimer_us_to_ticks,
+        };
+        systimer_hal_set_tick_rate_ops(&systimer_hal, &ops);
+        systimer_ll_set_counter_value(systimer_hal.dev, SYSTIMER_COUNTER_OS_TICK, 0);
+        systimer_ll_apply_counter_value(systimer_hal.dev, SYSTIMER_COUNTER_OS_TICK);
 
         for (cpuid = 0; cpuid < SOC_CPU_CORES_NUM; cpuid++) {
-            systimer_hal_counter_can_stall_by_cpu(&systimer_hal, SYSTIMER_LL_COUNTER_OS_TICK, cpuid, false);
+            systimer_hal_counter_can_stall_by_cpu(&systimer_hal, SYSTIMER_COUNTER_OS_TICK, cpuid, false);
         }
 
         for (cpuid = 0; cpuid < portNUM_PROCESSORS; ++cpuid) {
-            uint32_t alarm_id = SYSTIMER_LL_ALARM_OS_TICK_CORE0 + cpuid;
+            uint32_t alarm_id = SYSTIMER_ALARM_OS_TICK_CORE0 + cpuid;
 
             /* configure the timer */
-            systimer_hal_connect_alarm_counter(&systimer_hal, alarm_id, SYSTIMER_LL_COUNTER_OS_TICK);
+            systimer_hal_connect_alarm_counter(&systimer_hal, alarm_id, SYSTIMER_COUNTER_OS_TICK);
             systimer_hal_set_alarm_period(&systimer_hal, alarm_id, 1000000UL / CONFIG_FREERTOS_HZ);
             systimer_hal_select_alarm_mode(&systimer_hal, alarm_id, SYSTIMER_ALARM_MODE_PERIOD);
-            systimer_hal_counter_can_stall_by_cpu(&systimer_hal, SYSTIMER_LL_COUNTER_OS_TICK, cpuid, true);
+            systimer_hal_counter_can_stall_by_cpu(&systimer_hal, SYSTIMER_COUNTER_OS_TICK, cpuid, true);
             if (cpuid == 0) {
                 systimer_hal_enable_alarm_int(&systimer_hal, alarm_id);
-                systimer_hal_enable_counter(&systimer_hal, SYSTIMER_LL_COUNTER_OS_TICK);
+                systimer_hal_enable_counter(&systimer_hal, SYSTIMER_COUNTER_OS_TICK);
 #ifndef CONFIG_FREERTOS_UNICORE
                 // SysTick of core 0 and core 1 are shifted by half of period
-                systimer_hal_counter_value_advance(&systimer_hal, SYSTIMER_LL_COUNTER_OS_TICK, 1000000UL / CONFIG_FREERTOS_HZ / 2);
+                systimer_hal_counter_value_advance(&systimer_hal, SYSTIMER_COUNTER_OS_TICK, 1000000UL / CONFIG_FREERTOS_HZ / 2);
 #endif
             }
         }
     } else {
-        uint32_t alarm_id = SYSTIMER_LL_ALARM_OS_TICK_CORE0 + cpuid;
+        uint32_t alarm_id = SYSTIMER_ALARM_OS_TICK_CORE0 + cpuid;
         systimer_hal_enable_alarm_int(&systimer_hal, alarm_id);
     }
 }
@@ -125,11 +132,11 @@ IRAM_ATTR void SysTickIsrHandler(void *arg)
     ESP_PM_TRACE_ENTER(TICK, cpuid);
 #endif
 
-    uint32_t alarm_id = SYSTIMER_LL_ALARM_OS_TICK_CORE0 + cpuid;
+    uint32_t alarm_id = SYSTIMER_ALARM_OS_TICK_CORE0 + cpuid;
     do {
         systimer_ll_clear_alarm_int(systimer_hal->dev, alarm_id);
 
-        uint32_t diff = systimer_hal_get_counter_value(systimer_hal, SYSTIMER_LL_COUNTER_OS_TICK) / systimer_ll_get_alarm_period(systimer_hal->dev, alarm_id) - s_handled_systicks[cpuid];
+        uint32_t diff = systimer_hal_get_counter_value(systimer_hal, SYSTIMER_COUNTER_OS_TICK) / systimer_ll_get_alarm_period(systimer_hal->dev, alarm_id) - s_handled_systicks[cpuid];
         if (diff > 0) {
             if (s_handled_systicks[cpuid] == 0) {
                 s_handled_systicks[cpuid] = diff;
@@ -151,6 +158,8 @@ IRAM_ATTR void SysTickIsrHandler(void *arg)
 
 #endif // CONFIG_FREERTOS_SYSTICK_USES_CCOUNT
 
+
+extern void esp_vApplicationTickHook(void);
 /**
  * @brief Handler of SysTick
  *
@@ -165,11 +174,37 @@ BaseType_t xPortSysTickHandler(void)
     portbenchmarkIntLatency();
 #endif //configBENCHMARK
     traceISR_ENTER(SYSTICK_INTR_ID);
-    BaseType_t ret = xTaskIncrementTick();
-    if(ret != pdFALSE) {
+
+    // Call IDF Tick Hook
+    esp_vApplicationTickHook();
+
+    // Call FreeRTOS Increment tick function
+    BaseType_t xSwitchRequired;
+#if ( configNUM_CORES > 1 )
+    /*
+    For SMP, xTaskIncrementTick() will internally enter a critical section. But only core 0 calls xTaskIncrementTick()
+    while core 1 should call xTaskIncrementTickOtherCores().
+    */
+    if (xPortGetCoreID() == 0) {
+        xSwitchRequired = xTaskIncrementTick();
+    } else {
+        xSwitchRequired = xTaskIncrementTickOtherCores();
+    }
+#else // configNUM_CORES > 1
+    /*
+    Vanilla (single core) FreeRTOS expects that xTaskIncrementTick() cannot be interrupted (i.e., no nested interrupts).
+    Thus we have to disable interrupts before calling it.
+    */
+    UBaseType_t uxSavedInterruptStatus = portSET_INTERRUPT_MASK_FROM_ISR();
+    xSwitchRequired = xTaskIncrementTick();
+    portCLEAR_INTERRUPT_MASK_FROM_ISR(uxSavedInterruptStatus);
+#endif
+
+    // Check if yield is required
+    if (xSwitchRequired != pdFALSE) {
         portYIELD_FROM_ISR();
     } else {
         traceISR_EXIT();
     }
-    return ret;
+    return xSwitchRequired;
 }

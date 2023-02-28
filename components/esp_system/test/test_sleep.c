@@ -15,10 +15,10 @@
 #include "soc/gpio_periph.h"
 #include "hal/uart_types.h"
 #include "hal/uart_ll.h"
+#include "driver/uart.h"
 #include "soc/rtc.h"            // for wakeup trigger defines
 #include "soc/rtc_periph.h"     // for read rtc registers directly (cause)
 #include "soc/soc.h"            // for direct register read macros
-#include "hal/rtc_cntl_ll.h"
 #include "esp_newlib.h"
 #include "test_utils.h"
 #include "sdkconfig.h"
@@ -27,12 +27,21 @@
 #include "esp_timer.h"
 #include "esp_private/esp_clk.h"
 #include "esp_random.h"
+#include "nvs_flash.h"
+#include "nvs.h"
+
+#if SOC_PMU_SUPPORTED
+#include "esp_private/esp_pmu.h"
+#else
+#include "hal/rtc_cntl_ll.h"
+#endif
 
 #define ESP_EXT0_WAKEUP_LEVEL_LOW 0
 #define ESP_EXT0_WAKEUP_LEVEL_HIGH 1
 
 __attribute__((unused)) static struct timeval tv_start, tv_stop;
 
+#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C6, ESP32H2)
 #ifndef CONFIG_FREERTOS_UNICORE
 static void deep_sleep_task(void *arg)
 {
@@ -63,8 +72,6 @@ TEST_CASE("enter deep sleep on APP CPU and wake up using timer", "[deepsleep][re
 }
 #endif
 
-#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
-//IDF-5131
 TEST_CASE("wake up from deep sleep using timer", "[deepsleep][reset=DEEPSLEEP_RESET]")
 {
     esp_sleep_enable_timer_wakeup(2000000);
@@ -78,7 +85,6 @@ TEST_CASE("light sleep followed by deep sleep", "[deepsleep][reset=DEEPSLEEP_RES
     esp_deep_sleep_start();
 }
 
-//IDF-5053
 TEST_CASE("wake up from light sleep using timer", "[deepsleep]")
 {
     esp_sleep_enable_timer_wakeup(2000000);
@@ -90,7 +96,6 @@ TEST_CASE("wake up from light sleep using timer", "[deepsleep]")
                (tv_stop.tv_usec - tv_start.tv_usec) * 1e-3f;
     TEST_ASSERT_INT32_WITHIN(500, 2000, (int) dt);
 }
-#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
 
 //NOTE: Explained in IDF-1445 | MR !14996
 #if !(CONFIG_SPIRAM) || (CONFIG_SPIRAM_MALLOC_ALWAYSINTERNAL >= 16384)
@@ -208,7 +213,10 @@ TEST_CASE("light sleep and frequency switching", "[deepsleep]")
     clk_source = UART_SCLK_XTAL;
 #endif
     uart_ll_set_sclk(UART_LL_GET_HW(CONFIG_ESP_CONSOLE_UART_NUM), clk_source);
-    uart_ll_set_baudrate(UART_LL_GET_HW(CONFIG_ESP_CONSOLE_UART_NUM), CONFIG_ESP_CONSOLE_UART_BAUDRATE);
+
+    uint32_t sclk_freq;
+    TEST_ESP_OK(uart_get_sclk_freq(clk_source, &sclk_freq));
+    uart_ll_set_baudrate(UART_LL_GET_HW(CONFIG_ESP_CONSOLE_UART_NUM), CONFIG_ESP_CONSOLE_UART_BAUDRATE, sclk_freq);
 #endif
 
     rtc_cpu_freq_config_t config_xtal, config_default;
@@ -228,8 +236,6 @@ TEST_CASE("light sleep and frequency switching", "[deepsleep]")
     }
 }
 
-#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
-//IDF-5131
 static void do_deep_sleep(void)
 {
     esp_sleep_enable_timer_wakeup(100000);
@@ -271,6 +277,7 @@ TEST_CASE_MULTIPLE_STAGES("enter deep sleep after abort", "[deepsleep][reset=abo
         check_abort_reset_and_sleep,
         check_sleep_reset);
 
+#if SOC_RTC_FAST_MEM_SUPPORTED
 static RTC_DATA_ATTR uint32_t s_wake_stub_var;
 
 static RTC_IRAM_ATTR void wake_stub(void)
@@ -296,12 +303,10 @@ static void check_wake_stub(void)
 #endif
 }
 
-
 TEST_CASE_MULTIPLE_STAGES("can set sleep wake stub", "[deepsleep][reset=DEEPSLEEP_RESET]",
         prepare_wake_stub,
         check_wake_stub);
-
-#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
+#endif // SOC_RTC_FAST_MEM_SUPPORTED
 
 
 #if CONFIG_ESP_SYSTEM_ALLOW_RTC_FAST_MEM_AS_HEAP
@@ -370,9 +375,7 @@ TEST_CASE_MULTIPLE_STAGES("can set sleep wake stub from stack in RTC RAM", "[dee
 
 #if SOC_RTCIO_INPUT_OUTPUT_SUPPORTED
 
-
-#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
-//IDF-5131
+#if SOC_PM_SUPPORT_EXT_WAKEUP
 TEST_CASE("wake up using ext0 (13 high)", "[deepsleep][ignore]")
 {
     ESP_ERROR_CHECK(rtc_gpio_init(GPIO_NUM_13));
@@ -426,8 +429,7 @@ TEST_CASE("wake up using ext1 when RTC_PERIPH is on (13 low)", "[deepsleep][igno
     ESP_ERROR_CHECK(esp_sleep_enable_ext1_wakeup(BIT(GPIO_NUM_13), ESP_EXT1_WAKEUP_ALL_LOW));
     esp_deep_sleep_start();
 }
-
-#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
+#endif // SOC_PM_SUPPORT_EXT_WAKEUP
 
 __attribute__((unused)) static float get_time_ms(void)
 {
@@ -440,8 +442,11 @@ __attribute__((unused)) static float get_time_ms(void)
 
 __attribute__((unused)) static uint32_t get_cause(void)
 {
-    uint32_t wakeup_cause = REG_GET_FIELD(RTC_CNTL_WAKEUP_STATE_REG, \
-                                            RTC_CNTL_WAKEUP_CAUSE);
+#if SOC_PMU_SUPPORTED
+    uint32_t wakeup_cause = pmu_ll_hp_get_wakeup_cause(&PMU);
+#else
+    uint32_t wakeup_cause = rtc_cntl_ll_get_wakeup_cause();
+#endif
     return wakeup_cause;
 }
 
@@ -524,11 +529,30 @@ TEST_CASE("disable source trigger behavior", "[deepsleep]")
 
 #endif //SOC_RTCIO_INPUT_OUTPUT_SUPPORTED
 
-#if !TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
-//IDF-5131
-static RTC_DATA_ATTR struct timeval start;
 static void trigger_deepsleep(void)
 {
+    struct timeval start;
+
+    // Use NVS instead of RTC mem to store the start time of deep sleep
+    // Beacuse not all esp chips support RTC mem(such as esp32c2)
+    // Initialize NVS
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS partition was truncated and needs to be erased
+        // Retry nvs_flash_init
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    nvs_handle_t nvs_handle;
+    err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        printf("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+    } else {
+        printf("Done\n");
+    }
+
     printf("Trigger deep sleep. Waiting for 10 sec ...\n");
 
     // Simulate the dispersion of the calibration coefficients at start-up.
@@ -541,6 +565,14 @@ static void trigger_deepsleep(void)
 
     // Save start time. Deep sleep.
     gettimeofday(&start, NULL);
+
+    ESP_ERROR_CHECK(nvs_set_i32(nvs_handle, "start_sec", start.tv_sec));
+    ESP_ERROR_CHECK(nvs_set_i32(nvs_handle, "start_usec", start.tv_usec));
+    ESP_ERROR_CHECK(nvs_commit(nvs_handle));
+    nvs_close(nvs_handle);
+    // Deinit NVS to prevent Unity from complaining "The test leaked too much memory"
+    ESP_ERROR_CHECK(nvs_flash_deinit());
+
     esp_sleep_enable_timer_wakeup(1000);
     // In function esp_deep_sleep_start() uses function esp_sync_timekeeping_timers()
     // to prevent a negative time after wake up.
@@ -549,11 +581,39 @@ static void trigger_deepsleep(void)
 
 static void check_time_deepsleep(void)
 {
-    struct timeval stop;
+    struct timeval start, stop;
+
+    // Initialize NVS
+    esp_err_t err = nvs_flash_init();
+    if (err == ESP_ERR_NVS_NO_FREE_PAGES || err == ESP_ERR_NVS_NEW_VERSION_FOUND) {
+        // NVS partition was truncated and needs to be erased
+        // Retry nvs_flash_init
+        ESP_ERROR_CHECK(nvs_flash_erase());
+        err = nvs_flash_init();
+    }
+    ESP_ERROR_CHECK(err);
+
+    nvs_handle_t nvs_handle;
+    err = nvs_open("storage", NVS_READWRITE, &nvs_handle);
+    if (err != ESP_OK) {
+        printf("Error (%s) opening NVS handle!\n", esp_err_to_name(err));
+    } else {
+        printf("Done\n");
+    }
+
+    // Get start time of deep sleep
+    ESP_ERROR_CHECK(nvs_get_i32(nvs_handle, "start_sec", (int32_t *)&start.tv_sec));
+    ESP_ERROR_CHECK(nvs_get_i32(nvs_handle, "start_usec", (int32_t *)&start.tv_usec));
+    nvs_close(nvs_handle);
+    // Deinit NVS to prevent Unity from complaining "The test leaked too much memory"
+    ESP_ERROR_CHECK(nvs_flash_deinit());
+
+    // Reset must be caused by deep sleep
     soc_reset_reason_t reason = esp_rom_get_reset_reason(0);
     TEST_ASSERT(reason == RESET_REASON_CORE_DEEP_SLEEP);
-    gettimeofday(&stop, NULL);
+
     // Time dt_ms must in any case be positive.
+    gettimeofday(&stop, NULL);
     int dt_ms = (stop.tv_sec - start.tv_sec) * 1000 + (stop.tv_usec - start.tv_usec) / 1000;
     printf("delta time = %d \n", dt_ms);
     TEST_ASSERT_MESSAGE(dt_ms > 0, "Time in deep sleep is negative");
@@ -585,4 +645,4 @@ TEST_CASE("wake up using GPIO (2 or 4 low)", "[deepsleep][ignore]")
     esp_deep_sleep_start();
 }
 #endif // SOC_GPIO_SUPPORT_DEEPSLEEP_WAKEUP
-#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32C2)
+#endif //!TEMPORARY_DISABLED_FOR_TARGETS(ESP32C6, ESP32H2) TODO: IDF-5349

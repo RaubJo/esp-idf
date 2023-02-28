@@ -12,6 +12,8 @@
 #include "hal/cache_hal.h"
 #include "hal/cache_types.h"
 #include "hal/cache_ll.h"
+#include "hal/mmu_hal.h"
+#include "hal/mmu_ll.h"
 #include "soc/soc_caps.h"
 
 #if CONFIG_IDF_TARGET_ESP32S2
@@ -22,6 +24,10 @@
 #include "esp32c3/rom/cache.h"
 #elif CONFIG_IDF_TARGET_ESP32C2
 #include "esp32c2/rom/cache.h"
+#elif CONFIG_IDF_TARGET_ESP32H4
+#include "esp32h4/rom/cache.h"
+#elif CONFIG_IDF_TARGET_ESP32C6
+#include "esp32c6/rom/cache.h"
 #elif CONFIG_IDF_TARGET_ESP32H2
 #include "esp32h2/rom/cache.h"
 #endif
@@ -107,4 +113,11 @@ void cache_hal_enable(cache_type_t type)
         Cache_Enable_DCache(ctx.data_autoload_flag);
     }
 #endif
+}
+
+void cache_hal_invalidate_addr(uint32_t vaddr, uint32_t size)
+{
+    //Now only esp32 has 2 MMUs, this file doesn't build on esp32
+    HAL_ASSERT(mmu_hal_check_valid_ext_vaddr_region(0, vaddr, size, MMU_VADDR_DATA | MMU_VADDR_INSTRUCTION));
+    Cache_Invalidate_Addr(vaddr, size);
 }

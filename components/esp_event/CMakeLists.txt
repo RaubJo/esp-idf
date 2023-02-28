@@ -8,15 +8,8 @@ set(srcs "default_event_loop.c"
 
 if(${target} STREQUAL "linux")
     list(APPEND requires "linux")
-    # Temporary fix until esp_system is available for linux, too
-    list(APPEND priv_include_dirs "$ENV{IDF_PATH}/tools/mocks/esp_system/include")
 else()
-    list(APPEND requires "esp_netif")
-    if(${target} STREQUAL "esp32")
-        list(APPEND priv_requires esp_eth esp_timer)
-    else()
-        list(APPEND priv_requires esp_timer)
-    endif()
+    list(APPEND priv_requires esp_timer)
 endif()
 
 idf_component_register(SRCS ${srcs}
@@ -25,3 +18,5 @@ idf_component_register(SRCS ${srcs}
                     REQUIRES ${requires}
                     PRIV_REQUIRES ${priv_requires}
                     LDFRAGMENTS linker.lf)
+
+target_compile_options(${COMPONENT_LIB} PRIVATE "-Wno-format")

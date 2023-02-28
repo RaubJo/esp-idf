@@ -26,7 +26,7 @@ Most applications use the following workflow when working with ``esp_vfs_fat_`` 
 
 2. Call :cpp:func:`ff_diskio_register` to register the disk I/O driver for the drive number used in Step 1.
 
-3. Call the FatFs function ``f_mount``, and optionally ``f_fdisk``, ``f_mkfs``, to mount the filesystem using the same drive number which was passed to :cpp:func:`esp_vfs_fat_register`. For more information, see `FatFs documentation <http://www.elm-chan.org/fsw/ff/doc/mount.html>`_.
+3. Call the FatFs function ``f_mount``, and optionally ``f_fdisk``, ``f_mkfs``, to mount the filesystem using the same drive number which was passed to :cpp:func:`esp_vfs_fat_register`. For more information, see `FatFs documentation <http://elm-chan.org/fsw/ff/doc/mount.html>`_.
 
 4. Call the C standard library and POSIX API functions to perform such actions on files as open, read, write, erase, copy, etc. Use paths starting with the path prefix passed to :cpp:func:`esp_vfs_register` (for example, ``"/sdcard/hello.txt"``). The filesystem uses `8.3 filenames <https://en.wikipedia.org/wiki/8.3_filename>`_ format (SFN) by default. If you need to use long filenames (LFN), enable the :ref:`CONFIG_FATFS_LONG_FILENAMES` option. More details on the FatFs filenames are available `here <http://elm-chan.org/fsw/ff/doc/filename.html>`_.
 
@@ -123,6 +123,9 @@ The arguments of the function are as follows:
 
 3. flag ``FLASH_IN_PROJECT`` - optionally, users can have the image automatically flashed together with the app binaries, partition tables, etc. on ``idf.py flash -p <PORT>`` by specifying ``FLASH_IN_PROJECT``.
 
+4. flag ``PRESERVE_TIME`` - optionally, users can force preserving the timestamps from the source folder to the target image. Without preserving the time, every timestamp will be set to the FATFS default initial time (1st January 1980).
+
+
 For example::
 
     fatfs_create_spiflash_image(my_fatfs_partition my_folder FLASH_IN_PROJECT)
@@ -141,4 +144,4 @@ It is a reverse tool of (:component_file:`fatfsgen.py<fatfs/fatfsgen.py>`), i.e.
 
 Usage::
 
-    ./fatfsparse.py [-h] [--long-name-support] fatfs_image.img
+    ./fatfsparse.py [-h] [--wl-layer {detect,enabled,disabled}] fatfs_image.img

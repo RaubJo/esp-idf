@@ -20,7 +20,6 @@
 #include "esp_log.h"
 #include "nvs_flash.h"
 /* BLE */
-#include "esp_nimble_hci.h"
 #include "nimble/nimble_port.h"
 #include "nimble/nimble_port_freertos.h"
 #include "host/ble_hs.h"
@@ -40,9 +39,17 @@ static uint8_t ext_adv_pattern_1[] = {
 
 static const char *tag = "NimBLE_BLE_PRPH";
 static int bleprph_gap_event(struct ble_gap_event *event, void *arg);
+#if CONFIG_EXAMPLE_RANDOM_ADDR
+static uint8_t own_addr_type = BLE_OWN_ADDR_RANDOM;
+#else
 static uint8_t own_addr_type;
+#endif
 
 void ble_store_config_init(void);
+
+#if MYNEWT_VAL(BLE_POWER_CONTROL)
+static struct ble_gap_event_listener power_control_event_listener;
+#endif
 
 /**
  * Logs information about a connection to the console.
@@ -90,8 +97,6 @@ ext_bleprph_advertise(void)
 
     /* enable connectable advertising */
     params.connectable = 1;
-    params.scannable = 1;
-    params.legacy_pdu = 1;
 
     /* advertise using random addr */
     params.own_addr_type = BLE_OWN_ADDR_PUBLIC;
@@ -194,6 +199,53 @@ bleprph_advertise(void)
 }
 #endif
 
+#if MYNEWT_VAL(BLE_POWER_CONTROL)
+static void bleprph_power_control(uint16_t conn_handle)
+{
+    int rc;
+
+    rc = ble_gap_read_remote_transmit_power_level(conn_handle, 0x01 );  // Attempting on LE 1M phy
+    assert (rc == 0);
+
+    rc = ble_gap_set_transmit_power_reporting_enable(conn_handle, 0x1, 0x1);
+    assert (rc == 0);
+}
+#endif
+
+
+#if MYNEWT_VAL(BLE_POWER_CONTROL)
+static int
+bleprph_gap_power_event(struct ble_gap_event *event, void *arg)
+{
+
+    switch(event->type) {
+    case BLE_GAP_EVENT_TRANSMIT_POWER:
+	MODLOG_DFLT(INFO, "Transmit power event : status=%d conn_handle=%d reason=%d "
+                          "phy=%d power_level=%x power_level_flag=%d delta=%d",
+		    event->transmit_power.status,
+		    event->transmit_power.conn_handle,
+		    event->transmit_power.reason,
+		    event->transmit_power.phy,
+		    event->transmit_power.transmit_power_level,
+		    event->transmit_power.transmit_power_level_flag,
+		    event->transmit_power.delta);
+	return 0;
+
+    case BLE_GAP_EVENT_PATHLOSS_THRESHOLD:
+	MODLOG_DFLT(INFO, "Pathloss threshold event : conn_handle=%d current path loss=%d "
+                          "zone_entered =%d",
+		    event->pathloss_threshold.conn_handle,
+		    event->pathloss_threshold.current_path_loss,
+		    event->pathloss_threshold.zone_entered);
+	return 0;
+
+    default:
+	return 0;
+    }
+}
+#endif
+
+
 /**
  * The nimble host executes this callback when a GAP event occurs.  The
  * application associates a GAP event callback with each connection that forms.
@@ -236,6 +288,13 @@ bleprph_gap_event(struct ble_gap_event *event, void *arg)
             bleprph_advertise();
 #endif
         }
+
+#if MYNEWT_VAL(BLE_POWER_CONTROL)
+	bleprph_power_control(event->connect.conn_handle);
+
+	ble_gap_event_listener_register(&power_control_event_listener,
+                                        bleprph_gap_power_event, NULL);
+#endif
         return 0;
 
     case BLE_GAP_EVENT_DISCONNECT:
@@ -277,6 +336,15 @@ bleprph_gap_event(struct ble_gap_event *event, void *arg)
         assert(rc == 0);
         bleprph_print_conn_desc(&desc);
         MODLOG_DFLT(INFO, "\n");
+        return 0;
+
+    case BLE_GAP_EVENT_NOTIFY_TX:
+        MODLOG_DFLT(INFO, "notify_tx event; conn_handle=%d attr_handle=%d "
+                    "status=%d is_indication=%d",
+                    event->notify_tx.conn_handle,
+                    event->notify_tx.attr_handle,
+                    event->notify_tx.status,
+                    event->notify_tx.indication);
         return 0;
 
     case BLE_GAP_EVENT_SUBSCRIBE:
@@ -322,11 +390,11 @@ bleprph_gap_event(struct ble_gap_event *event, void *arg)
         if (event->passkey.params.action == BLE_SM_IOACT_DISP) {
             pkey.action = event->passkey.params.action;
             pkey.passkey = 123456; // This is the passkey to be entered on peer
-            ESP_LOGI(tag, "Enter passkey %d on the peer side", pkey.passkey);
+            ESP_LOGI(tag, "Enter passkey %" PRIu32 "on the peer side", pkey.passkey);
             rc = ble_sm_inject_io(event->passkey.conn_handle, &pkey);
             ESP_LOGI(tag, "ble_sm_inject_io result: %d\n", rc);
         } else if (event->passkey.params.action == BLE_SM_IOACT_NUMCMP) {
-            ESP_LOGI(tag, "Passkey on device's display: %d", event->passkey.params.numcmp);
+            ESP_LOGI(tag, "Passkey on device's display: %" PRIu32 , event->passkey.params.numcmp);
             ESP_LOGI(tag, "Accept or reject the passkey through console in this format -> key Y or key N");
             pkey.action = event->passkey.params.action;
             if (scli_receive_key(&key)) {
@@ -358,6 +426,7 @@ bleprph_gap_event(struct ble_gap_event *event, void *arg)
             ESP_LOGI(tag, "ble_sm_inject_io result: %d\n", rc);
         }
         return 0;
+
     }
 
     return 0;
@@ -369,13 +438,40 @@ bleprph_on_reset(int reason)
     MODLOG_DFLT(ERROR, "Resetting state; reason=%d\n", reason);
 }
 
+#if CONFIG_EXAMPLE_RANDOM_ADDR
+static void
+ble_app_set_addr(void)
+{
+    ble_addr_t addr;
+    int rc;
+
+    /* generate new non-resolvable private address */
+    rc = ble_hs_id_gen_rnd(0, &addr);
+    assert(rc == 0);
+
+    /* set generated address */
+    rc = ble_hs_id_set_rnd(addr.val);
+
+    assert(rc == 0);
+}
+#endif
+
 static void
 bleprph_on_sync(void)
 {
     int rc;
 
+#if CONFIG_EXAMPLE_RANDOM_ADDR
+    /* Generate a non-resolvable private address. */
+    ble_app_set_addr();
+#endif
+
     /* Make sure we have proper identity address set (public preferred) */
+#if CONFIG_EXAMPLE_RANDOM_ADDR
+    rc = ble_hs_util_ensure_addr(1);
+#else
     rc = ble_hs_util_ensure_addr(0);
+#endif
     assert(rc == 0);
 
     /* Figure out address to use while advertising (no privacy for now) */
@@ -422,9 +518,11 @@ app_main(void)
     }
     ESP_ERROR_CHECK(ret);
 
-    ESP_ERROR_CHECK(esp_nimble_hci_and_controller_init());
-
-    nimble_port_init();
+    ret = nimble_port_init();
+    if (ret != ESP_OK) {
+        ESP_LOGE(tag, "Failed to init nimble %d ", ret);
+        return;
+    }
     /* Initialize the NimBLE host configuration. */
     ble_hs_cfg.reset_cb = bleprph_on_reset;
     ble_hs_cfg.sync_cb = bleprph_on_sync;
@@ -444,8 +542,11 @@ app_main(void)
     ble_hs_cfg.sm_sc = 0;
 #endif
 #ifdef CONFIG_EXAMPLE_BONDING
-    ble_hs_cfg.sm_our_key_dist = 1;
-    ble_hs_cfg.sm_their_key_dist = 1;
+    /* Enable the appropriate bit masks to make sure the keys
+     * that are needed are exchanged
+     */
+    ble_hs_cfg.sm_our_key_dist = BLE_SM_PAIR_KEY_DIST_ENC;
+    ble_hs_cfg.sm_their_key_dist = BLE_SM_PAIR_KEY_DIST_ENC;
 #endif
 
 

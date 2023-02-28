@@ -4,7 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-#include "sys/param.h"
+#include <sys/param.h>
+#include "sdkconfig.h"
 #include "esp_timer_impl.h"
 #include "esp_err.h"
 #include "esp_timer.h"
@@ -15,6 +16,8 @@
 #include "soc/periph_defs.h"
 #include "soc/soc_caps.h"
 #include "esp_private/esp_clk.h"
+#include "esp_private/systimer.h"
+#include "esp_private/periph_ctrl.h"
 #include "freertos/FreeRTOS.h"
 #include "hal/systimer_ll.h"
 #include "hal/systimer_types.h"
@@ -45,7 +48,7 @@ static intr_handler_t s_alarm_handler = NULL;
 static systimer_hal_context_t systimer_hal;
 
 /* Spinlock used to protect access to the hardware registers. */
-portMUX_TYPE s_time_update_lock = portMUX_INITIALIZER_UNLOCKED;
+static portMUX_TYPE s_time_update_lock = portMUX_INITIALIZER_UNLOCKED;
 
 void esp_timer_impl_lock(void)
 {
@@ -59,12 +62,14 @@ void esp_timer_impl_unlock(void)
 
 uint64_t IRAM_ATTR esp_timer_impl_get_counter_reg(void)
 {
-    return systimer_hal_get_counter_value(&systimer_hal, SYSTIMER_LL_COUNTER_CLOCK);
+    return systimer_hal_get_counter_value(&systimer_hal, SYSTIMER_COUNTER_ESPTIMER);
 }
 
 int64_t IRAM_ATTR esp_timer_impl_get_time(void)
 {
-    return systimer_hal_get_counter_value(&systimer_hal, SYSTIMER_LL_COUNTER_CLOCK) / SYSTIMER_LL_TICKS_PER_US;
+    // we hope the execution time of this function won't > 1us
+    // thus, to save one function call, we didn't use the existing `systimer_hal_get_time`
+    return systimer_hal.ticks_to_us(systimer_hal_get_counter_value(&systimer_hal, SYSTIMER_COUNTER_ESPTIMER));
 }
 
 int64_t esp_timer_get_time(void) __attribute__((alias("esp_timer_impl_get_time")));
@@ -75,9 +80,7 @@ void IRAM_ATTR esp_timer_impl_set_alarm_id(uint64_t timestamp, unsigned alarm_id
     portENTER_CRITICAL_SAFE(&s_time_update_lock);
     timestamp_id[alarm_id] = timestamp;
     timestamp = MIN(timestamp_id[0], timestamp_id[1]);
-    if (timestamp != UINT64_MAX) {
-        systimer_hal_set_alarm_target(&systimer_hal, SYSTIMER_LL_ALARM_CLOCK, timestamp);
-    }
+    systimer_hal_set_alarm_target(&systimer_hal, SYSTIMER_ALARM_ESPTIMER, timestamp);
     portEXIT_CRITICAL_SAFE(&s_time_update_lock);
 }
 
@@ -89,14 +92,14 @@ void IRAM_ATTR esp_timer_impl_set_alarm(uint64_t timestamp)
 static void IRAM_ATTR timer_alarm_isr(void *arg)
 {
     // clear the interrupt
-    systimer_ll_clear_alarm_int(systimer_hal.dev, SYSTIMER_LL_ALARM_CLOCK);
+    systimer_ll_clear_alarm_int(systimer_hal.dev, SYSTIMER_ALARM_ESPTIMER);
     /* Call the upper layer handler */
     (*s_alarm_handler)(arg);
 }
 
 void IRAM_ATTR esp_timer_impl_update_apb_freq(uint32_t apb_ticks_per_us)
 {
-#if !SOC_SYSTIMER_FIXED_TICKS_US
+#if !SOC_SYSTIMER_FIXED_DIVIDER
     systimer_hal_on_apb_freq_update(&systimer_hal, apb_ticks_per_us);
 #endif
 }
@@ -104,33 +107,41 @@ void IRAM_ATTR esp_timer_impl_update_apb_freq(uint32_t apb_ticks_per_us)
 void esp_timer_impl_set(uint64_t new_us)
 {
     portENTER_CRITICAL_SAFE(&s_time_update_lock);
-    systimer_counter_value_t new_count = { .val = new_us * SYSTIMER_LL_TICKS_PER_US };
-    systimer_ll_set_counter_value(systimer_hal.dev, SYSTIMER_LL_COUNTER_CLOCK, new_count.val);
-    systimer_ll_apply_counter_value(systimer_hal.dev, SYSTIMER_LL_COUNTER_CLOCK);
+    systimer_counter_value_t new_count = {
+        .val = systimer_hal.us_to_ticks(new_us),
+    };
+    systimer_ll_set_counter_value(systimer_hal.dev, SYSTIMER_COUNTER_ESPTIMER, new_count.val);
+    systimer_ll_apply_counter_value(systimer_hal.dev, SYSTIMER_COUNTER_ESPTIMER);
     portEXIT_CRITICAL_SAFE(&s_time_update_lock);
 }
 
 void esp_timer_impl_advance(int64_t time_diff_us)
 {
     portENTER_CRITICAL_SAFE(&s_time_update_lock);
-    systimer_hal_counter_value_advance(&systimer_hal, SYSTIMER_LL_COUNTER_CLOCK, time_diff_us);
+    systimer_hal_counter_value_advance(&systimer_hal, SYSTIMER_COUNTER_ESPTIMER, time_diff_us);
     portEXIT_CRITICAL_SAFE(&s_time_update_lock);
 }
 
 esp_err_t esp_timer_impl_early_init(void)
 {
+    periph_module_enable(PERIPH_SYSTIMER_MODULE);
+    systimer_hal_tick_rate_ops_t ops = {
+        .ticks_to_us = systimer_ticks_to_us,
+        .us_to_ticks = systimer_us_to_ticks,
+    };
     systimer_hal_init(&systimer_hal);
+    systimer_hal_set_tick_rate_ops(&systimer_hal, &ops);
 
-#if !SOC_SYSTIMER_FIXED_TICKS_US
+#if !SOC_SYSTIMER_FIXED_DIVIDER
     assert(esp_clk_xtal_freq() == (40 * 1000000) &&
-            "update the step for xtal to support other XTAL:APB frequency ratios");
+           "update the step for xtal to support other XTAL:APB frequency ratios");
     systimer_hal_set_steps_per_tick(&systimer_hal, 0, 2); // for xtal
     systimer_hal_set_steps_per_tick(&systimer_hal, 1, 1); // for pll
 #endif
 
-    systimer_hal_enable_counter(&systimer_hal, SYSTIMER_LL_COUNTER_CLOCK);
-    systimer_hal_select_alarm_mode(&systimer_hal, SYSTIMER_LL_ALARM_CLOCK, SYSTIMER_ALARM_MODE_ONESHOT);
-    systimer_hal_connect_alarm_counter(&systimer_hal, SYSTIMER_LL_ALARM_CLOCK, SYSTIMER_LL_COUNTER_CLOCK);
+    systimer_hal_enable_counter(&systimer_hal, SYSTIMER_COUNTER_ESPTIMER);
+    systimer_hal_select_alarm_mode(&systimer_hal, SYSTIMER_ALARM_ESPTIMER, SYSTIMER_ALARM_MODE_ONESHOT);
+    systimer_hal_connect_alarm_counter(&systimer_hal, SYSTIMER_ALARM_ESPTIMER, SYSTIMER_COUNTER_ESPTIMER);
 
     return ESP_OK;
 }
@@ -157,7 +168,7 @@ esp_err_t esp_timer_impl_init(intr_handler_t alarm_handler)
     * protected by a shared spinlock. Since this code runs as part of early startup, this
     * is practically not an issue.
     */
-    systimer_hal_enable_alarm_int(&systimer_hal, SYSTIMER_LL_ALARM_CLOCK);
+    systimer_hal_enable_alarm_int(&systimer_hal, SYSTIMER_ALARM_ESPTIMER);
 
     err = esp_intr_enable(s_timer_interrupt_handle);
     if (err != ESP_OK) {
@@ -167,9 +178,9 @@ esp_err_t esp_timer_impl_init(intr_handler_t alarm_handler)
     return ESP_OK;
 
 err_intr_en:
-    systimer_ll_enable_alarm(systimer_hal.dev, SYSTIMER_LL_ALARM_CLOCK, false);
+    systimer_ll_enable_alarm(systimer_hal.dev, SYSTIMER_ALARM_ESPTIMER, false);
     /* TODO: may need a spinlock, see the note related to SYSTIMER_INT_ENA_REG in systimer_hal_init */
-    systimer_ll_enable_alarm_int(systimer_hal.dev, SYSTIMER_LL_ALARM_CLOCK, false);
+    systimer_ll_enable_alarm_int(systimer_hal.dev, SYSTIMER_ALARM_ESPTIMER, false);
     esp_intr_free(s_timer_interrupt_handle);
 err_intr_alloc:
     s_alarm_handler = NULL;
@@ -179,9 +190,9 @@ err_intr_alloc:
 void esp_timer_impl_deinit(void)
 {
     esp_intr_disable(s_timer_interrupt_handle);
-    systimer_ll_enable_alarm(systimer_hal.dev, SYSTIMER_LL_ALARM_CLOCK, false);
+    systimer_ll_enable_alarm(systimer_hal.dev, SYSTIMER_ALARM_ESPTIMER, false);
     /* TODO: may need a spinlock, see the note related to SYSTIMER_INT_ENA_REG in systimer_hal_init */
-    systimer_ll_enable_alarm_int(systimer_hal.dev, SYSTIMER_LL_ALARM_CLOCK, false);
+    systimer_ll_enable_alarm_int(systimer_hal.dev, SYSTIMER_ALARM_ESPTIMER, false);
     esp_intr_free(s_timer_interrupt_handle);
     s_timer_interrupt_handle = NULL;
     s_alarm_handler = NULL;
@@ -195,7 +206,7 @@ uint64_t IRAM_ATTR esp_timer_impl_get_min_period_us(void)
 uint64_t esp_timer_impl_get_alarm_reg(void)
 {
     portENTER_CRITICAL_SAFE(&s_time_update_lock);
-    uint64_t val = systimer_hal_get_alarm_value(&systimer_hal, SYSTIMER_LL_ALARM_CLOCK);
+    uint64_t val = systimer_hal_get_alarm_value(&systimer_hal, SYSTIMER_ALARM_ESPTIMER);
     portEXIT_CRITICAL_SAFE(&s_time_update_lock);
     return val;
 }

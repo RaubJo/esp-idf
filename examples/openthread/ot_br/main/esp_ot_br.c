@@ -10,7 +10,7 @@
  * Unless required by applicable law or agreed to in writing, this
  * software is distributed on an "AS IS" BASIS, WITHOUT WARRANTIES OR
  * CONDITIONS OF ANY KIND, either express or implied.
-*/
+ */
 
 #include <stdio.h>
 #include <string.h>
@@ -28,7 +28,10 @@
 #include "esp_openthread_lock.h"
 #include "esp_openthread_netif_glue.h"
 #include "esp_openthread_types.h"
+#include "esp_ot_cli_extension.h"
 #include "esp_ot_config.h"
+#include "esp_ot_wifi_cmd.h"
+#include "esp_vfs_dev.h"
 #include "esp_vfs_eventfd.h"
 #include "esp_wifi.h"
 #include "mdns.h"
@@ -51,8 +54,6 @@
 #include "openthread/logging.h"
 #include "openthread/tasklet.h"
 #include "openthread/thread_ftd.h"
-#include "esp_ot_wifi_cmd.h"
-#include "esp_ot_cli_extension.h"
 
 #define TAG "esp_ot_br"
 
@@ -166,7 +167,7 @@ static void ot_task_worker(void *aContext)
     };
 
     esp_netif_config_t cfg = ESP_NETIF_DEFAULT_OPENTHREAD();
-    esp_netif_t *openthread_netif = esp_netif_new(&cfg);
+    esp_netif_t       *openthread_netif = esp_netif_new(&cfg);
     assert(openthread_netif != NULL);
     // Initialize the OpenThread stack
 
@@ -182,9 +183,8 @@ static void ot_task_worker(void *aContext)
     ESP_ERROR_CHECK(esp_openthread_border_router_init());
     create_config_network(esp_openthread_get_instance());
     launch_openthread_network(esp_openthread_get_instance());
-#else
-    esp_cli_custom_command_init();
 #endif // CONFIG_OPENTHREAD_BR_AUTO_START
+    esp_cli_custom_command_init();
     esp_openthread_lock_release();
 
     // Run the main loop
@@ -205,13 +205,20 @@ void app_main(void)
     // * task queue
     // * border router
     esp_vfs_eventfd_config_t eventfd_config = {
+#if CONFIG_OPENTHREAD_RADIO_NATIVE
+        // * radio driver (A native radio device needs a eventfd for radio driver.)
+        .max_fds = 4,
+#else
         .max_fds = 3,
+#endif
     };
     ESP_ERROR_CHECK(esp_vfs_eventfd_register(&eventfd_config));
 
     ESP_ERROR_CHECK(nvs_flash_init());
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
+
+#if CONFIG_EXAMPLE_CONNECT_WIFI
 #if CONFIG_OPENTHREAD_BR_AUTO_START
     ESP_ERROR_CHECK(example_connect());
     ESP_ERROR_CHECK(esp_wifi_set_ps(WIFI_PS_NONE));
@@ -220,6 +227,13 @@ void app_main(void)
     esp_ot_wifi_netif_init();
     esp_openthread_set_backbone_netif(esp_netif_get_handle_from_ifkey("WIFI_STA_DEF"));
 #endif // CONFIG_OPENTHREAD_BR_AUTO_START
+#elif CONFIG_EXAMPLE_CONNECT_ETHERNET
+    ESP_ERROR_CHECK(example_connect());
+    esp_openthread_set_backbone_netif(get_example_netif());
+#else
+    ESP_LOGE(TAG, "ESP-Openthread has not set backbone netif");
+#endif // CONFIG_EXAMPLE_CONNECT_WIFI
+
     ESP_ERROR_CHECK(mdns_init());
     ESP_ERROR_CHECK(mdns_hostname_set("esp-ot-br"));
     xTaskCreate(ot_task_worker, "ot_br_main", 20480, xTaskGetCurrentTaskHandle(), 5, NULL);

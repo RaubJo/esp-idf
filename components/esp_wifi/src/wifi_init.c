@@ -8,7 +8,7 @@
 #include <esp_wifi.h>
 #include "esp_log.h"
 #include "esp_private/wifi.h"
-#include "esp_private/adc2_wifi.h"
+#include "esp_private/adc_share_hw_ctrl.h"
 #include "esp_pm.h"
 #include "esp_sleep.h"
 #include "esp_private/pm_impl.h"
@@ -17,13 +17,13 @@
 #include "esp_netif.h"
 #include "esp_coexist_internal.h"
 #include "esp_phy_init.h"
-#include "phy.h"
+#include "esp_private/phy.h"
 
-#if (CONFIG_ESP32_WIFI_RX_BA_WIN > CONFIG_ESP32_WIFI_DYNAMIC_RX_BUFFER_NUM)
+#if (CONFIG_ESP_WIFI_RX_BA_WIN > CONFIG_ESP_WIFI_DYNAMIC_RX_BUFFER_NUM)
 #error "WiFi configuration check: WARNING, WIFI_RX_BA_WIN should not be larger than WIFI_DYNAMIC_RX_BUFFER_NUM!"
 #endif
 
-#if (CONFIG_ESP32_WIFI_RX_BA_WIN > (CONFIG_ESP32_WIFI_STATIC_RX_BUFFER_NUM << 1))
+#if (CONFIG_ESP_WIFI_RX_BA_WIN > (CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM << 1))
 #error "WiFi configuration check: WARNING, WIFI_RX_BA_WIN should not be larger than double of the WIFI_STATIC_RX_BUFFER_NUM!"
 #endif
 
@@ -41,7 +41,7 @@ wifi_mac_time_update_cb_t s_wifi_mac_time_update_cb = NULL;
 
 /* Set additional WiFi features and capabilities */
 uint64_t g_wifi_feature_caps =
-#if CONFIG_ESP32_WIFI_ENABLE_WPA3_SAE
+#if CONFIG_ESP_WIFI_ENABLE_WPA3_SAE
     CONFIG_FEATURE_WPA3_SAE_BIT |
 #endif
 #if CONFIG_SPIRAM
@@ -129,22 +129,19 @@ esp_err_t esp_wifi_deinit(void)
     esp_unregister_mac_bb_pd_callback(pm_mac_sleep);
     esp_unregister_mac_bb_pu_callback(pm_mac_wakeup);
 #endif
-#if CONFIG_IDF_TARGET_ESP32C3
-    phy_init_flag();
-#endif
     esp_wifi_power_domain_off();
 #if CONFIG_MAC_BB_PD
     esp_mac_bb_pd_mem_deinit();
 #endif
-    esp_phy_pd_mem_deinit();
+    esp_phy_modem_deinit();
 
     return err;
 }
 
 static void esp_wifi_config_info(void)
 {
-#ifdef CONFIG_ESP32_WIFI_RX_BA_WIN
-    ESP_LOGI(TAG, "rx ba win: %d", CONFIG_ESP32_WIFI_RX_BA_WIN);
+#ifdef CONFIG_ESP_WIFI_RX_BA_WIN
+    ESP_LOGI(TAG, "rx ba win: %d", CONFIG_ESP_WIFI_RX_BA_WIN);
 #endif
 
 #ifdef CONFIG_ESP_NETIF_TCPIP_LWIP
@@ -159,11 +156,11 @@ static void esp_wifi_config_info(void)
     ESP_LOGI(TAG, "WiFi/LWIP prefer SPIRAM");
 #endif
 
-#ifdef CONFIG_ESP32_WIFI_IRAM_OPT
+#ifdef CONFIG_ESP_WIFI_IRAM_OPT
     ESP_LOGI(TAG, "WiFi IRAM OP enabled");
 #endif
 
-#ifdef CONFIG_ESP32_WIFI_RX_IRAM_OPT
+#ifdef CONFIG_ESP_WIFI_RX_IRAM_OPT
     ESP_LOGI(TAG, "WiFi RX IRAM OP enabled");
 #endif
 
@@ -182,6 +179,11 @@ static void esp_wifi_config_info(void)
 
 esp_err_t esp_wifi_init(const wifi_init_config_t *config)
 {
+    if ((config->feature_caps & CONFIG_FEATURE_CACHE_TX_BUF_BIT) && (WIFI_CACHE_TX_BUFFER_NUM == 0))
+    {
+        ESP_LOGE(TAG, "Number of WiFi cache TX buffers should not equal 0 when enable SPIRAM");
+        return ESP_ERR_NOT_SUPPORTED;
+    }
     esp_wifi_power_domain_on();
 #ifdef CONFIG_PM_ENABLE
     if (s_wifi_modem_sleep_lock == NULL) {
@@ -234,6 +236,9 @@ esp_err_t esp_wifi_init(const wifi_init_config_t *config)
         return ret;
     }
     esp_sleep_enable_wifi_wakeup();
+#if CONFIG_SW_COEXIST_ENABLE || CONFIG_EXTERNAL_COEX_ENABLE
+    coex_wifi_register_update_lpclk_callback(esp_wifi_update_tsf_tick_interval);
+#endif
 #endif
 #endif
 
@@ -247,7 +252,7 @@ esp_err_t esp_wifi_init(const wifi_init_config_t *config)
         esp_mac_bb_pd_mem_init();
         esp_wifi_internal_set_mac_sleep(true);
 #endif
-        esp_phy_pd_mem_init();
+        esp_phy_modem_init();
 #if CONFIG_IDF_TARGET_ESP32
         s_wifi_mac_time_update_cb = esp_wifi_internal_update_mac_time;
 #endif

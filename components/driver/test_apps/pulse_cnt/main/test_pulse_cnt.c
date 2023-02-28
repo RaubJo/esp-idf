@@ -218,7 +218,7 @@ typedef struct {
 } test_pcnt_quadrature_context_t;
 
 TEST_PCNT_CALLBACK_ATTR
-static bool test_pcnt_quadrature_reach_watch_point(pcnt_unit_handle_t handle, pcnt_watch_event_data_t *event_data, void *user_data)
+static bool test_pcnt_quadrature_reach_watch_point(pcnt_unit_handle_t handle, const pcnt_watch_event_data_t *event_data, void *user_data)
 {
     test_pcnt_quadrature_context_t *user_ctx = (test_pcnt_quadrature_context_t *)user_data;
     user_ctx->triggered_watch_values[user_ctx->index++] = event_data->watch_point_value;
@@ -281,8 +281,11 @@ TEST_CASE("pcnt_quadrature_decode_event", "[pcnt]")
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, pcnt_unit_add_watch_point(unit, 50));
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, pcnt_unit_add_watch_point(unit, 100));
 
-    // Clear internal counter, and make the watch points take effect
+#if !SOC_PCNT_SUPPORT_RUNTIME_THRES_UPDATE
+    // the above added watch point won't take effect at once, unless we clear the internal counter manually
     TEST_ESP_OK(pcnt_unit_clear_count(unit));
+#endif
+
     // start unit should fail if it's not enabled yet
     TEST_ASSERT_EQUAL(ESP_ERR_INVALID_STATE, pcnt_unit_start(unit));
     TEST_ESP_OK(pcnt_unit_enable(unit));
@@ -338,7 +341,7 @@ typedef struct {
 } test_pcnt_zero_cross_context_t;
 
 TEST_PCNT_CALLBACK_ATTR
-static bool test_pcnt_on_zero_cross(pcnt_unit_handle_t handle, pcnt_watch_event_data_t *event_data, void *user_data)
+static bool test_pcnt_on_zero_cross(pcnt_unit_handle_t handle, const pcnt_watch_event_data_t *event_data, void *user_data)
 {
     test_pcnt_zero_cross_context_t *user_ctx = (test_pcnt_zero_cross_context_t *)user_data;
     user_ctx->mode = event_data->zero_cross_mode;

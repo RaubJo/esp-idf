@@ -1,5 +1,5 @@
 /*
- * SPDX-FileCopyrightText: 2021-2022 Espressif Systems (Shanghai) CO LTD
+ * SPDX-FileCopyrightText: 2022-2023 Espressif Systems (Shanghai) CO LTD
  *
  * SPDX-License-Identifier: Apache-2.0
  */
@@ -11,11 +11,17 @@
 #include "hal/efuse_hal.h"
 #include "hal/efuse_ll.h"
 
-#define ESP_EFUSE_BLOCK_ERROR_BITS(error_reg, block) ((error_reg) & (0x0F << (4 * (block))))
+#define ESP_EFUSE_BLOCK_ERROR_BITS(error_reg, block) ((error_reg) & (0x08 << (4 * (block))))
+#define ESP_EFUSE_BLOCK_ERROR_NUM_BITS(error_reg, block) ((error_reg) & (0x07 << (4 * (block))))
 
-uint32_t efuse_hal_get_chip_revision(void)
+uint32_t efuse_hal_get_major_chip_version(void)
 {
-    return efuse_ll_get_chip_revision();
+    return efuse_ll_get_chip_wafer_version_major();
+}
+
+uint32_t efuse_hal_get_minor_chip_version(void)
+{
+    return efuse_ll_get_chip_wafer_version_minor();
 }
 
 /******************* eFuse control functions *************************/
@@ -23,7 +29,7 @@ uint32_t efuse_hal_get_chip_revision(void)
 void efuse_hal_set_timing(uint32_t apb_freq_hz)
 {
     (void) apb_freq_hz;
-    efuse_ll_set_pwr_off_num(0x190);
+    // keep the default values, no need to change
 }
 
 void efuse_hal_read(void)

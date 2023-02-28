@@ -25,7 +25,6 @@
 #define DR_REG_ITAG_TABLE                       0x600C6000
 #define DR_REG_DTAG_TABLE                       0x600C8000
 #define DR_REG_EXT_MEM_ENC                      0x600CC000
-#define DR_REG_DPORT_END                        0x600D3FFC
 
 
 #define REG_UHCI_BASE(i)         (DR_REG_UHCI0_BASE - (i) * 0x8000)
@@ -152,12 +151,11 @@
 //Periheral Clock {{
 #define  APB_CLK_FREQ_ROM                            (40*1000000)
 #define  CPU_CLK_FREQ_ROM                            APB_CLK_FREQ_ROM
-#define  UART_CLK_FREQ_ROM                           (40*1000000)
 #define  EFUSE_CLK_FREQ_ROM                          (20*1000000)
+#define  CPU_CLK_FREQ_MHZ_BTLD                       (80)               // The cpu clock frequency (in MHz) to set at 2nd stage bootloader system clock configuration
 #define  CPU_CLK_FREQ                                APB_CLK_FREQ
 #define  APB_CLK_FREQ                                (80*1000000)
 #define  REF_CLK_FREQ                                (1000000)
-#define  RTC_CLK_FREQ                                (20*1000000)
 #define  XTAL_CLK_FREQ                               (40*1000000)
 #define  UART_CLK_FREQ                               APB_CLK_FREQ
 #define  WDT_CLK_FREQ                                APB_CLK_FREQ
@@ -200,6 +198,10 @@
 #define SOC_DIRAM_DRAM_LOW    0x3FC88000
 #define SOC_DIRAM_DRAM_HIGH   0x3FCF0000
 
+#define SOC_I_D_OFFSET (SOC_DIRAM_IRAM_LOW - SOC_DIRAM_DRAM_LOW)
+#define MAP_DRAM_TO_IRAM(addr) (addr + SOC_I_D_OFFSET)
+#define MAP_IRAM_TO_DRAM(addr) (addr - SOC_I_D_OFFSET)
+
 // Region of memory accessible via DMA in internal memory. See esp_ptr_dma_capable().
 #define SOC_DMA_LOW  0x3FC88000
 #define SOC_DMA_HIGH 0x3FD00000
@@ -219,7 +221,8 @@
 #define SOC_MEM_INTERNAL_HIGH       0x403E2000
 
 // Start (highest address) of ROM boot stack, only relevant during early boot
-#define SOC_ROM_STACK_START         0x3fcebf10
+#define SOC_ROM_STACK_START         0x3fceb710
+#define SOC_ROM_STACK_SIZE          0x2000
 
 //interrupt cpu using table, Please see the core-isa.h
 /*************************************************************************************************************
@@ -283,3 +286,6 @@
 
 //Invalid interrupt for number interrupt matrix
 #define ETS_INVALID_INUM                        6
+
+// Interrupt number for the Interrupt watchdog
+#define ETS_INT_WDT_INUM                         (ETS_T1_WDT_INUM)

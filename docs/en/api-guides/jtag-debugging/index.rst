@@ -66,7 +66,7 @@ Likewise, the "Application Loading and Monitoring" label indicates the key softw
 
 "Debugging With JTAG" and "Application Loading and Monitoring" is integrated under the `Eclipse <https://www.eclipse.org/>`_ IDE in order to provide a quick and easy transition between writing/compiling/loading/debugging code. The Eclipse IDE (and the integrated debugging software) is available for Windows, Linux and macOS platforms. Depending on user preferences, both the debugger and ``idf.py build`` can also be used directly from terminal/command line, instead of Eclipse.
 
-.. only:: not SOC_USB_SERIAL_JTAG_SUPPORTED
+.. only:: esp32 or esp32s2
 
     If the |devkit-name-with-link| is used, then connection from PC to {IDF_TARGET_NAME} is done effectively with a single USB cable. This is made possible by the FT2232H chip, which provides two USB channels, one for JTAG and the other for UART connection.
 
@@ -85,7 +85,7 @@ Likewise, the "Application Loading and Monitoring" label indicates the key softw
 Selecting JTAG Adapter
 ----------------------
 
-.. only:: not SOC_USB_SERIAL_JTAG_SUPPORTED
+.. only:: esp32 or esp32s2
 
     The quickest and most convenient way to start with JTAG debugging is by using |devkit-name-with-link|. Each version of this development board has JTAG interface already built in. No need for an external JTAG adapter and extra wiring / cable to connect JTAG to {IDF_TARGET_NAME}. |devkit-name| is using FT2232H JTAG interface operating at 20 MHz clock speed, which is difficult to achieve with an external adapter.
 
@@ -171,13 +171,15 @@ Open a terminal and set it up for using the ESP-IDF as described in the :ref:`se
    :start-after: run-openocd
    :end-before: ---
 
+{IDF_TARGET_FTDI_CONFIG:default="Not Updated!", esp32s3="board/esp32s3-ftdi.cfg", esp32c3="board/esp32c3-ftdi.cfg", esp32c6="board/esp32c6-ftdi.cfg", esp32h2="board/esp32h2-ftdi.cfg"}
+
 .. note::
 
     The files provided after ``-f`` above are specific for |run-openocd-device-name|. You may need to provide different files depending on the hardware that is used. For guidance see :ref:`jtag-debugging-tip-openocd-configure-target`.
 
-    .. only:: esp32c3
+    .. only:: SOC_USB_SERIAL_JTAG_SUPPORTED
 
-    For example, ``board/esp32c3-ftdi.cfg`` can be used for a custom board with an FT2232H or FT232H chip used for JTAG connection, or with ESP-Prog.
+        For example, ``{IDF_TARGET_FTDI_CONFIG}`` can be used for a custom board with an FT2232H or FT232H chip used for JTAG connection, or with ESP-Prog.
 
 .. highlight:: none
 
@@ -206,13 +208,15 @@ Another option is to write application image to flash using OpenOCD via JTAG wit
 
 OpenOCD flashing command ``program_esp`` has the following format:
 
-``program_esp <image_file> <offset> [verify] [reset] [exit]``
+``program_esp <image_file> <offset> [verify] [reset] [exit] [compress] [encrypt]``
 
  - ``image_file`` - Path to program image file.
  - ``offset`` - Offset in flash bank to write image.
  - ``verify`` - Optional. Verify flash contents after writing.
  - ``reset`` - Optional. Reset target after programing.
  - ``exit`` - Optional. Finally exit OpenOCD.
+ - ``compress`` - Optional. Compress image file before programming.
+ - ``encrypt`` - Optional. Encrypt binary before writing to flash. Same functionality with ``idf.py encrypted-flash``
 
 You are now ready to start application debugging. Follow the steps described in the section below.
 
@@ -248,6 +252,11 @@ This section is intended for users not familiar with GDB. It presents example de
 7. :ref:`jtag-debugging-examples-eclipse-07`
 
 Similar debugging actions are provided using GDB from :ref:`jtag-debugging-examples-command-line`.
+
+.. note::
+
+    :ref:`jtag-debugging-examples-command-line-08` is currently only available for command line debugging.
+
 
 Before proceeding to examples, set up your {IDF_TARGET_NAME} target and load it with :example:`get-started/blink`.
 

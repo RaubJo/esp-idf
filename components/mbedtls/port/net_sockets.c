@@ -11,8 +11,6 @@
 
 #include <mbedtls/build_info.h>
 
-#ifdef CONFIG_ESP_NETIF_TCPIP_LWIP
-
 #if !defined(MBEDTLS_NET_C)
 
 #if defined(MBEDTLS_PLATFORM_C)
@@ -36,6 +34,8 @@
 #include <stdio.h>
 #include <time.h>
 #include <stdint.h>
+#include <fcntl.h>
+#include <errno.h>
 
 /*
  * Prepare for using the sockets interface
@@ -427,5 +427,3 @@ void mbedtls_net_free( mbedtls_net_context *ctx )
 }
 
 #endif /* MBEDTLS_NET_C */
-
-#endif /* CONFIG_ESP_NETIF_TCPIP_LWIP */

@@ -15,9 +15,11 @@
 #include "heap_private.h"
 #include "esp_system.h"
 
-
-// forward declaration
-static void *heap_caps_realloc_base( void *ptr, size_t size, uint32_t caps);
+/* Forward declaration for base function, put in IRAM.
+ * These functions don't check for errors after trying to allocate memory. */
+static void *heap_caps_realloc_base( void *ptr, size_t size, uint32_t caps );
+static void *heap_caps_calloc_base( size_t n, size_t size, uint32_t caps );
+static void *heap_caps_malloc_base( size_t size, uint32_t caps );
 
 /*
 This file, combined with a region allocator that supports multiple heaps, solves the problem that the ESP32 has RAM
@@ -29,6 +31,27 @@ possible. This should optimize the amount of RAM accessible to the code without 
 */
 
 static esp_alloc_failed_hook_t alloc_failed_callback;
+
+
+#ifdef CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS
+IRAM_ATTR static void hex_to_str(char buf[8], uint32_t n)
+{
+    for (int i = 0; i < 8; i++) {
+        uint8_t b4 = (n >> (28 - i * 4)) & 0b1111;
+        buf[i] = b4 <= 9 ? '0' + b4 : 'a' + b4 - 10;
+    }
+}
+IRAM_ATTR static void fmt_abort_str(char dest[48], size_t size, uint32_t caps)
+{
+    char sSize[8];
+    char sCaps[8];
+    hex_to_str(sSize, size);
+    hex_to_str(sCaps, caps);
+    memcpy(dest, "Mem alloc fail. size 0x00000000 caps 0x00000000", 48);
+    memcpy(dest + 23, sSize, 8);
+    memcpy(dest + 39, sCaps, 8);
+}
+#endif
 
 /*
   This takes a memory chunk in a region that can be addressed as both DRAM as well as IRAM. It will convert it to
@@ -52,16 +75,17 @@ IRAM_ATTR static void *dram_alloc_to_iram_addr(void *addr, size_t len)
     return iptr + 1;
 }
 
-
-static void heap_caps_alloc_failed(size_t requested_size, uint32_t caps, const char *function_name)
+IRAM_ATTR NOINLINE_ATTR static void heap_caps_alloc_failed(size_t requested_size, uint32_t caps, const char *function_name)
 {
     if (alloc_failed_callback) {
         alloc_failed_callback(requested_size, caps, function_name);
     }
 
-    #ifdef CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS
-    esp_system_abort("Memory allocation failed");
-    #endif
+#ifdef CONFIG_HEAP_ABORT_WHEN_ALLOCATION_FAILS
+    char buf[48];
+    fmt_abort_str(buf, requested_size, caps);
+    esp_system_abort(buf);
+#endif
 }
 
 esp_err_t heap_caps_register_failed_alloc_callback(esp_alloc_failed_hook_t callback)
@@ -88,6 +112,10 @@ check for failure / call heap_caps_alloc_failed()
 IRAM_ATTR static void *heap_caps_malloc_base( size_t size, uint32_t caps)
 {
     void *ret = NULL;
+
+    if (size == 0) {
+        return NULL;
+    }
 
     if (size > HEAP_SIZE_MAX) {
         // Avoids int overflow when adding small numbers to size, or
@@ -125,7 +153,9 @@ IRAM_ATTR static void *heap_caps_malloc_base( size_t size, uint32_t caps)
                 //doesn't cover, see if they're available in other prios.
                 if ((get_all_caps(heap) & caps) == caps) {
                     //This heap can satisfy all the requested capabilities. See if we can grab some memory using it.
-                    if ((caps & MALLOC_CAP_EXEC) && esp_ptr_in_diram_dram((void *)heap->start)) {
+                    // If MALLOC_CAP_EXEC is requested but the DRAM and IRAM are on the same addresses (like on esp32c6)
+                    // proceed as for a default allocation.
+                    if ((caps & MALLOC_CAP_EXEC) && !esp_dram_match_iram() && esp_ptr_in_diram_dram((void *)heap->start)) {
                         //This is special, insofar that what we're going to get back is a DRAM address. If so,
                         //we need to 'invert' it (lowest address in DRAM == highest address in IRAM and vice-versa) and
                         //add a pointer to the DRAM equivalent before the address we're going to return.
@@ -158,7 +188,7 @@ IRAM_ATTR void *heap_caps_malloc( size_t size, uint32_t caps){
 
     void* ptr = heap_caps_malloc_base(size, caps);
 
-    if (!ptr){
+    if (!ptr && size > 0){
         heap_caps_alloc_failed(size, caps, __func__);
     }
 
@@ -193,13 +223,13 @@ IRAM_ATTR void *heap_caps_malloc_default( size_t size )
         } else {
             r=heap_caps_malloc_base( size, MALLOC_CAP_DEFAULT | MALLOC_CAP_SPIRAM );
         }
-        if (r==NULL) {
+        if (r==NULL && size > 0) {
             //try again while being less picky
             r=heap_caps_malloc_base( size, MALLOC_CAP_DEFAULT );
         }
 
         // allocation failure?
-        if (r==NULL){
+        if (r==NULL && size > 0){
             heap_caps_alloc_failed(size, MALLOC_CAP_DEFAULT, __func__);
         }
 
@@ -248,12 +278,16 @@ IRAM_ATTR void *heap_caps_malloc_prefer( size_t size, size_t num, ... )
     va_list argp;
     va_start( argp, num );
     void *r = NULL;
+    uint32_t caps = MALLOC_CAP_DEFAULT;
     while (num--) {
-        uint32_t caps = va_arg( argp, uint32_t );
-        r = heap_caps_malloc( size, caps );
-        if (r != NULL) {
+        caps = va_arg( argp, uint32_t );
+        r = heap_caps_malloc_base( size, caps );
+        if (r != NULL || size == 0) {
             break;
         }
+    }
+    if (r == NULL && size > 0){
+        heap_caps_alloc_failed(size, caps, __func__);
     }
     va_end( argp );
     return r;
@@ -267,12 +301,16 @@ IRAM_ATTR void *heap_caps_realloc_prefer( void *ptr, size_t size, size_t num, ..
     va_list argp;
     va_start( argp, num );
     void *r = NULL;
+    uint32_t caps = MALLOC_CAP_DEFAULT;
     while (num--) {
-        uint32_t caps = va_arg( argp, uint32_t );
-        r = heap_caps_realloc( ptr, size, caps );
+        caps = va_arg( argp, uint32_t );
+        r = heap_caps_realloc_base( ptr, size, caps );
         if (r != NULL || size == 0) {
             break;
         }
+    }
+    if (r == NULL && size > 0){
+        heap_caps_alloc_failed(size, caps, __func__);
     }
     va_end( argp );
     return r;
@@ -286,10 +324,16 @@ IRAM_ATTR void *heap_caps_calloc_prefer( size_t n, size_t size, size_t num, ... 
     va_list argp;
     va_start( argp, num );
     void *r = NULL;
+    uint32_t caps = MALLOC_CAP_DEFAULT;
     while (num--) {
-        uint32_t caps = va_arg( argp, uint32_t );
-        r = heap_caps_calloc( n, size, caps );
-        if (r != NULL) break;
+        caps = va_arg( argp, uint32_t );
+        r = heap_caps_calloc_base( n, size, caps );
+        if (r != NULL || size == 0){
+            break;
+        }
+    }
+    if (r == NULL && size > 0){
+        heap_caps_alloc_failed(size, caps, __func__);
     }
     va_end( argp );
     return r;
@@ -421,7 +465,11 @@ IRAM_ATTR void *heap_caps_realloc( void *ptr, size_t size, uint32_t caps)
     return ptr;
 }
 
-IRAM_ATTR void *heap_caps_calloc( size_t n, size_t size, uint32_t caps)
+/*
+This function should not be called directly as it does not
+check for failure / call heap_caps_alloc_failed()
+*/
+IRAM_ATTR static void *heap_caps_calloc_base( size_t n, size_t size, uint32_t caps)
 {
     void *result;
     size_t size_bytes;
@@ -430,11 +478,22 @@ IRAM_ATTR void *heap_caps_calloc( size_t n, size_t size, uint32_t caps)
         return NULL;
     }
 
-    result = heap_caps_malloc(size_bytes, caps);
+    result = heap_caps_malloc_base(size_bytes, caps);
     if (result != NULL) {
-        bzero(result, size_bytes);
+        memset(result, 0, size_bytes);
     }
     return result;
+}
+
+IRAM_ATTR void *heap_caps_calloc( size_t n, size_t size, uint32_t caps)
+{
+    void* ptr = heap_caps_calloc_base(n, size, caps);
+
+    if (!ptr && size > 0){
+        heap_caps_alloc_failed(size, caps, __func__);
+    }
+
+    return ptr;
 }
 
 size_t heap_caps_get_total_size(uint32_t caps)
@@ -482,7 +541,7 @@ size_t heap_caps_get_largest_free_block( uint32_t caps )
 
 void heap_caps_get_info( multi_heap_info_t *info, uint32_t caps )
 {
-    bzero(info, sizeof(multi_heap_info_t));
+    memset(info, 0, sizeof(multi_heap_info_t));
 
     heap_t *heap;
     SLIST_FOREACH(heap, &registered_heaps, next) {
@@ -589,6 +648,10 @@ IRAM_ATTR void *heap_caps_aligned_alloc(size_t alignment, size_t size, uint32_t 
 
     //Alignment must be a power of two:
     if((alignment & (alignment - 1)) != 0) {
+        return NULL;
+    }
+
+    if (size == 0) {
         return NULL;
     }
 

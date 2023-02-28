@@ -7,16 +7,6 @@
 /**
  * System level MSPI APIs (private)
  */
-/**
- * Currently the MSPI timing tuning related APIs are designed to be private.
- * Because:
- * 1. now we don't split SPI0 and SPI1, we don't have a component for SPI0, including PSRAM, Cache, etc..
- * 2. SPI0 and SPI1 are strongly coupling.
- *
- * In the future, we may consider creating a component for SPI0, and spi_flash component will only work on SPI1 (and it
- * can rely on SPI0). Therefore, we can put these APIs there.
- *
- */
 #pragma once
 
 #include <stdint.h>
@@ -27,10 +17,31 @@
 #include "esp_flash.h"
 #include "hal/spi_flash_hal.h"
 #include "spi_flash_override.h"
+#include "soc/soc_caps.h"
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+// Type of MSPI IO
+typedef enum {
+    ESP_MSPI_IO_CLK = 0,
+    ESP_MSPI_IO_Q,
+    ESP_MSPI_IO_D,
+    ESP_MSPI_IO_CS0, /* cs for spi flash */
+    ESP_MSPI_IO_HD,
+    ESP_MSPI_IO_WP,
+#if SOC_SPI_MEM_SUPPORT_OPI_MODE
+    ESP_MSPI_IO_DQS,
+    ESP_MSPI_IO_D4,
+    ESP_MSPI_IO_D5,
+    ESP_MSPI_IO_D6,
+    ESP_MSPI_IO_D7,
+#endif // SOC_SPI_MEM_SUPPORT_OPI_MODE
+#if CONFIG_SPIRAM
+    ESP_MSPI_IO_CS1 /* cs for spi ram */
+#endif
+} esp_mspi_io_t;
 
 /**
  * @brief To setup Flash chip
@@ -38,40 +49,18 @@ extern "C" {
 esp_err_t spi_flash_init_chip_state(void);
 
 /**
- * @brief Make MSPI work under 20Mhz, remove the timing tuning required delays.
- * @param control_spi1  Select whether to control SPI1. For tuning, we need to use SPI1. After tuning (during startup stage), let the flash driver to control SPI1
- */
-void spi_timing_enter_mspi_low_speed_mode(bool control_spi1);
-
-/**
- * @brief Make MSPI work under the frequency as users set, may add certain delays to MSPI RX direction to meet timing requirements.
- * @param control_spi1  Select whether to control SPI1. For tuning, we need to use SPI1. After tuning (during startup stage), let the flash driver to control SPI1
- */
-void spi_timing_enter_mspi_high_speed_mode(bool control_spi1);
-
-/**
- * @brief Switch MSPI into low speed mode / high speed mode.
- * @note This API is cache safe, it will freeze both D$ and I$ and restore them after MSPI is switched
- * @note For some of the MSPI high frequency settings (e.g. 80M DDR mode Flash or PSRAM), timing tuning is required.
- *       Certain delays will be added to the MSPI RX direction. When CPU clock switches from PLL to XTAL, should call
- *       this API first to enter MSPI low speed mode to remove the delays, and vice versa.
- */
-void spi_timing_change_speed_mode_cache_safe(bool switch_down);
-
-/**
- * @brief Tune MSPI flash timing to make it work under high frequency
- */
-void spi_timing_flash_tuning(void);
-
-/**
- * @brief Tune MSPI psram timing to make it work under high frequency
- */
-void spi_timing_psram_tuning(void);
-
-/**
  * @brief To initislize the MSPI pins
  */
 void esp_mspi_pin_init(void);
+
+/**
+ * @brief Get the number of the GPIO corresponding to the given MSPI io
+ *
+ * @param[in] io  MSPI io
+ *
+ * @return MSPI IO number
+ */
+uint8_t esp_mspi_get_io(esp_mspi_io_t io);
 
 /**
  * @brief Set SPI1 registers to make ROM functions work
@@ -135,27 +124,49 @@ esp_err_t spi_flash_enable_high_performance_mode(void);
  *        This can be used when one flash has several dummy configurations to enable the high performance mode.
  * @note Don't forget to subtract one when assign to the register of mspi e.g. if the value you get is 4, (4-1=3) should be assigned to the register.
  *
- * @return Pointer to bootlaoder_flash_dummy_conf_t.
+ * @return Pointer to spi_flash_hpm_dummy_conf_t.
  */
-const spi_flash_hpm_dummy_conf_t *spi_flash_get_dummy(void);
-
-typedef enum {
-    FLASH_WRAP_MODE_8B = 0,
-    FLASH_WRAP_MODE_16B = 2,
-    FLASH_WRAP_MODE_32B = 4,
-    FLASH_WRAP_MODE_64B = 6,
-    FLASH_WRAP_MODE_DISABLE = 1
-} spi_flash_wrap_mode_t;
+const spi_flash_hpm_dummy_conf_t *spi_flash_hpm_get_dummy(void);
 
 /**
- * @brief set wrap mode of flash
+ * @brief Used to judge whether flash works under HPM mode with dummy adjustment.
  *
- * @param mode: wrap mode support disable, 16 32, 64 byte
+ * @return true Yes, and work under HPM with adjusting dummy. Otherwise, false.
+ */
+bool spi_flash_hpm_dummy_adjust(void);
+
+#if SOC_SPI_MEM_SUPPORT_WRAP
+/**
+ * @brief set wrap size of flash
+ *
+ * @param wrap_size: wrap mode support disable, 16 32, 64 byte
  *
  * @return esp_err_t : ESP_OK for successful.
  *
  */
-esp_err_t spi_flash_wrap_set(spi_flash_wrap_mode_t mode);
+esp_err_t spi_flash_wrap_enable(spi_flash_wrap_size_t wrap_size);
+
+/**
+ * @brief Probe flash wrap method
+ *
+ * @return esp_err_t: ESP_OK for success
+ */
+esp_err_t spi_flash_wrap_probe(void);
+
+/**
+ * @brief disable cache wrap
+ */
+esp_err_t spi_flash_wrap_disable(void);
+
+/**
+ * @brief Check whether flash and esp chip supports wrap mode.
+ *
+ * @param wrap_size wrap size.
+ * @return true: wrap support, otherwise, false.
+ */
+bool spi_flash_support_wrap_size(uint32_t wrap_size);
+
+#endif //SOC_SPI_MEM_SUPPORT_WRAP
 
 /**
  * @brief SPI flash critical section enter function.

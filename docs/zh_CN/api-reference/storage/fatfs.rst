@@ -26,7 +26,7 @@ FatFs 与 VFS 配合使用
 
 2. 调用 :cpp:func:`ff_diskio_register`，为步骤 1 中的驱动编号注册磁盘 I/O 驱动；
 
-3. 调用 FatFs 函数 ``f_mount``，随后调用 ``f_fdisk`` 或 ``f_mkfs``，并使用与传递到 :cpp:func:`esp_vfs_fat_register` 相同的驱动编号挂载文件系统。请参考 `FatFs 文档 <http://www.elm-chan.org/fsw/ff/doc/mount.html>`_，查看更多信息；
+3. 调用 FatFs 函数 ``f_mount``，随后调用 ``f_fdisk`` 或 ``f_mkfs``，并使用与传递到 :cpp:func:`esp_vfs_fat_register` 相同的驱动编号挂载文件系统。请参考 `FatFs 文档 <http://elm-chan.org/fsw/ff/doc/mount.html>`_，查看更多信息；
 
 4. 调用 C 标准库和 POSIX API 对路径中带有步骤 1 中所述前缀的文件（例如，``"/sdcard/hello.txt"``）执行打开、读取、写入、擦除、复制等操作。文件系统默认使用 `8.3 文件名 <https://en.wikipedia.org/wiki/8.3_filename>`_ 格式 (SFN)。若您需要使用长文件名 (LFN)，启用 :ref:`CONFIG_FATFS_LONG_FILENAMES` 选项。请参考 `here <http://elm-chan.org/fsw/ff/doc/filename.html>`_，查看更多信息；
 
@@ -121,7 +121,10 @@ FatFs 分区生成器
 
 2. base_dir - 目录名称，该目录会被编码为 FatFs 分区，也可以选择将其被烧录进设备。但注意必须在分区表中指定合适的分区大小。
 
-3. ``FLASH_IN_PROJECT`` 标志 - 用户可以通过指定 ``FLASH_IN_PROJECT``，选择在执行 ``idf.py flash -p <PORT>`` 时让分区镜像自动与应用程序二进制文件、分区表等一同烧录进设备。
+3. ``FLASH_IN_PROJECT`` 标志 - 可选参数，用户可以通过指定 ``FLASH_IN_PROJECT``，选择在执行 ``idf.py flash -p <PORT>`` 时让分区镜像自动与应用程序二进制文件、分区表等一同烧录进设备。
+
+4. ``PRESERVE_TIME`` 标志 - 可选参数，用户可强制让目标镜像保留源文件夹的时间戳。如果不保留，每个目标镜像的时间戳都将设置为 FATFS 默认初始时间（1980 年 1 月 1 日）。
+
 
 例如::
 
@@ -141,4 +144,4 @@ FatFs 分区分析器
 
 您可以使用::
 
-    ./fatfsparse.py [-h] [--long-name-support] fatfs_image.img
+    ./fatfsparse.py [-h] [--wl-layer {detect,enabled,disabled}] fatfs_image.img
